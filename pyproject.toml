@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flipshot"
+version = "0.1.0"
+description = "Grab a screenshot from a Flipper Zero over USB serial."
+authors = [
+    { name = "Ilia Petrov-Komotskii", email = "ilia@inkedkettle.art" }
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["flipper-zero", "flipper", "screenshot", "serial", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[project.urls]
+Repository = "https://github.com/ManeFunction/flipshot"
+
+[project.scripts]
+flipshot = "flipshot:main"
+
+[tool.setuptools]
+py-modules = ["flipshot"]
+
+[tool.setuptools.package-dir]
+"" = "src"
