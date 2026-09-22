@@ -75,3 +75,4 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           tap: ManeFunction/homebrew-tap
           formula: flipshot
+          no_fork: "true" # push the bump branch directly to the tap
