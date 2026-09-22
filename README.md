@@ -30,7 +30,14 @@ just a serial cable and this script.
     - Go to the folder with the script in your Terminal.
     - Run `pip install .` to install `flipshot` to your system.
     - Run `flipshot --version` to verify the script is working.
-4) **Python script (manual usage, for advanced users)**
+4) **Ready-to-use Windows binary (for Windows users without Python)**
+    - Download `flipshot.exe` from the [GitHub Releases](https://github.com/ManeFunction/flipshot/releases) page.
+    - Since it isn't code-signed, Windows SmartScreen may warn about an unrecognized publisher the first time
+      you run it — click "More info" → "Run anyway" to proceed.
+    - Open Command Prompt or PowerShell, `cd` to the folder with `flipshot.exe`, and run `.\flipshot.exe --version`
+      to verify it works.
+    - You are perfect, you can use the app with `.\flipshot.exe [port] [output.png]`.
+5) **Python script (manual usage, for advanced users)**
     - If you are familiar with Python scripts, venv, and dependencies, you can simply clone the repository,
       `pip3 install pyserial`, and run `src/flipshot.py` directly. Feel free to modify the script for yourself.
 

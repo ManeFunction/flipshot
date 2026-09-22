@@ -32,6 +32,31 @@ jobs:
           name: dist
           path: dist/
 
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pyserial nuitka
+
+      - name: Build standalone exe
+        run: >
+          python -m nuitka --onefile --assume-yes-for-downloads
+          --output-filename=flipshot.exe --output-dir=dist src/flipshot.py
+
+      - name: Smoke test the exe
+        run: dist/flipshot.exe --version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-exe
+          path: dist/flipshot.exe
+
   publish-pypi:
     needs: build
     runs-on: ubuntu-latest
@@ -47,7 +72,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
-    needs: publish-pypi
+    needs: [publish-pypi, windows-exe]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create a GitHub Release
@@ -55,6 +80,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: dist
+          path: dist/
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-exe
           path: dist/
 
       - name: Create GitHub Release
