@@ -33,6 +33,7 @@ from typing import Optional, Tuple
 
 import serial
 import serial.tools.list_ports
+from serial.tools.list_ports_common import ListPortInfo
 
 SCREEN_W, SCREEN_H = 128, 64
 
@@ -207,7 +208,7 @@ def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Opti
     return frame_data, (device_name or "unknown")
 
 
-def is_flipper_port(port_info: serial.tools.list_ports.ListPortInfo) -> bool:
+def is_flipper_port(port_info: ListPortInfo) -> bool:
     device = (port_info.device or "").lower()
     description = (port_info.description or "").lower()
     manufacturer = (port_info.manufacturer or "").lower()

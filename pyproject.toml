@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flipshot"
-version = "1.0.0"
+version = "1.0.1"
 description = "Grab a screenshot from a Flipper Zero over USB serial."
 authors = [
     { name = "Ilia Petrov-Komotskii", email = "ilia@inkedkettle.art" }
