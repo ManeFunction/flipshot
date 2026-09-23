@@ -47,13 +47,25 @@ just a serial cable and this script.
 ## Usage
 
 ```
-flipshot [serial_port] [output.png]
+flipshot [-h] [-v] [-b [N] [M]] [serial_port] [output.png]
 ```
 
+- `-h`, `--help` — show the help text and exit.
+- `-v`, `--version` — print the version and exit.
 - `serial_port` is optional — flipshot auto-detects a connected Flipper Zero over USB.
   Pass it explicitly if auto-detection fails, e.g. `flipshot /dev/cu.usbmodemflip_XXXX1`.
 - `output.png` is optional — defaults to `flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png`
-  in the current folder.
+  in the current folder. With `--burst` and an explicit path, files are numbered:
+  `shot.png` becomes `shot-1.png`, `shot-2.png`, and so on.
+- `-b`, `--burst [N] [M]` — take N screenshots, pausing M milliseconds between them.
+  N defaults to 10. `-1` keeps capturing until you stop the script (Ctrl+C).
+  M defaults to 1000 and must be between 100 and 5000.
+
+```
+flipshot -b
+flipshot -b 20 250
+flipshot --burst -1 100
+```
 
 Close qFlipper or any other serial terminal connected to the Flipper before running flipshot —
 only one process can hold the serial port at a time.

@@ -13,15 +13,21 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [serial_port] [output.png]
+    flipshot [-v] [-b [N] [M]] [serial_port] [output.png]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
 If output.png is omitted, the file name is
 flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png
+
+-b, --burst [N] [M] saves N screenshots, pausing M milliseconds between them.
+N defaults to 10 (-1 keeps going until the script is stopped). M defaults to
+1000 and must be between 100 and 5000.
 """
 
 import argparse
+import os
 import re
+import signal
 import struct
 import sys
 import time
@@ -54,6 +60,12 @@ DEVICE_NAME_INFO_KEYS = ("hardware.name", "hardware_name")
 
 FLIPPER_USB_VID = 0x0483
 FLIPPER_USB_PID = 0x5740
+
+BURST_DEFAULT_COUNT = 10
+BURST_DEFAULT_PAUSE_MS = 1000
+BURST_MIN_PAUSE_MS = 100
+BURST_MAX_PAUSE_MS = 5000
+FRAME_BYTES = (SCREEN_W * SCREEN_H) // 8
 
 
 # ---------------------------------------------------------------------------
@@ -288,28 +300,66 @@ def read_message(ser: serial.Serial) -> bytes:
     return data
 
 
-def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
-    ser = serial.Serial(
+def open_serial(port: str, timeout: float = 5.0) -> serial.Serial:
+    return serial.Serial(
         port,
         baudrate=115200,
         timeout=timeout,
         dsrdtr=False,
         write_timeout=5,
     )
+
+
+def send_start_screen_stream(ser: serial.Serial) -> None:
+    request = encode_varint_field(FIELD_COMMAND_ID, 1) + encode_length_delimited(
+        FIELD_GUI_START_SCREEN_STREAM, b""
+    )
+    write_message(ser, request)
+
+
+def send_device_info_request(ser: serial.Serial) -> None:
+    request = encode_varint_field(FIELD_COMMAND_ID, 10) + encode_length_delimited(
+        FIELD_SYSTEM_DEVICE_INFO_REQUEST, b""
+    )
+    write_message(ser, request)
+
+
+def send_stop_screen_stream(ser: serial.Serial) -> None:
+    request = encode_varint_field(FIELD_COMMAND_ID, 2) + encode_length_delimited(
+        FIELD_GUI_STOP_SCREEN_STREAM, b""
+    )
+    write_message(ser, request)
+
+
+def frame_from_message(msg: bytes) -> Optional[bytes]:
+    screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
+    if screen_frame is None:
+        return None
+    data = find_field(screen_frame, FIELD_SCREEN_FRAME_DATA)
+    if not data or len(data) != FRAME_BYTES:
+        return None
+    return data
+
+
+def require_frame(frame_data: Optional[bytes]) -> bytes:
+    if frame_data is None:
+        raise RuntimeError("Never received a screen frame before timing out")
+    if len(frame_data) != FRAME_BYTES:
+        raise RuntimeError(
+            f"Unexpected frame size {len(frame_data)} bytes (expected {FRAME_BYTES})"
+        )
+    return frame_data
+
+
+def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
+    ser = open_serial(port, timeout)
     try:
         start_rpc_session(ser)
 
         # Fire both requests up front -- they're independent, so we can read
         # whichever responses arrive first instead of waiting on them in series.
-        start_stream_request = encode_varint_field(
-            FIELD_COMMAND_ID, 1
-        ) + encode_length_delimited(FIELD_GUI_START_SCREEN_STREAM, b"")
-        write_message(ser, start_stream_request)
-
-        device_info_request = encode_varint_field(
-            FIELD_COMMAND_ID, 10
-        ) + encode_length_delimited(FIELD_SYSTEM_DEVICE_INFO_REQUEST, b"")
-        write_message(ser, device_info_request)
+        send_start_screen_stream(ser)
+        send_device_info_request(ser)
 
         try:
             frame_data, device_name = read_frame_and_device_name(ser, timeout)
@@ -317,22 +367,146 @@ def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
             frame_data, device_name = None, "unknown"
 
         # Politely stop the stream regardless of success.
-        stop_request = encode_varint_field(FIELD_COMMAND_ID, 2) + encode_length_delimited(
-            FIELD_GUI_STOP_SCREEN_STREAM, b""
-        )
-        write_message(ser, stop_request)
-
-        if frame_data is None:
-            raise RuntimeError("Never received a screen frame before timing out")
-        if len(frame_data) != (SCREEN_W * SCREEN_H) // 8:
-            raise RuntimeError(
-                f"Unexpected frame size {len(frame_data)} bytes "
-                f"(expected {(SCREEN_W * SCREEN_H) // 8})"
-            )
-
-        return frame_data, device_name
+        send_stop_screen_stream(ser)
+        return require_frame(frame_data), device_name
     finally:
         ser.close()
+
+
+class BurstStopped(Exception):
+    """The user asked an in-progress burst to end (Ctrl+C or SIGTERM)."""
+
+
+class _StopFlag:
+    def __init__(self) -> None:
+        self.requested = False
+
+    def request(self, _signum, _frame) -> None:
+        self.requested = True
+
+
+def wait_for_latest_frame(
+    ser: serial.Serial,
+    seconds: float,
+    frame_data: bytes,
+    stop: _StopFlag,
+) -> bytes:
+    """Keep reading for `seconds`, retaining the newest complete screen frame.
+
+    The stream stays open during the pause. Discarding frames as they arrive
+    avoids filling the serial buffer, and the frame returned is the screen at
+    the end of the pause rather than one queued at the start.
+    """
+    deadline = time.time() + seconds
+    original_timeout = ser.timeout
+    try:
+        while True:
+            if stop.requested:
+                raise BurstStopped
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return frame_data
+            ser.timeout = min(0.2, remaining)
+            try:
+                msg = read_message(ser)
+            except TimeoutError:
+                continue
+            newer = frame_from_message(msg)
+            if newer is not None:
+                frame_data = newer
+    finally:
+        ser.timeout = original_timeout
+
+
+def numbered_output_path(output: str, index: int) -> str:
+    root, ext = os.path.splitext(output)
+    if not ext:
+        ext = ".png"
+    return f"{root}-{index}{ext}"
+
+
+def save_frame(frame_data: bytes, device_name: str, output: Optional[str], index: Optional[int]) -> str:
+    if output is None:
+        path = default_output_path(device_name)
+    elif index is None:
+        path = output
+    else:
+        path = numbered_output_path(output, index)
+    save_png(path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H)
+    return path
+
+
+def _stopped_message(saved: int) -> str:
+    if saved == 0:
+        return "Stopped before any screenshot was saved."
+    if saved == 1:
+        return "Stopped after 1 screenshot."
+    return f"Stopped after {saved} screenshots."
+
+
+def capture_burst(
+    port: str,
+    count: int,
+    pause_ms: int,
+    output: Optional[str],
+    timeout: float = 5.0,
+) -> int:
+    infinite = count < 0
+    saved = 0
+    ser = None
+    streaming = False
+    stop = _StopFlag()
+    previous_term = signal.getsignal(signal.SIGTERM)
+    try:
+        signal.signal(signal.SIGTERM, stop.request)
+    except (ValueError, OSError):
+        previous_term = None
+
+    try:
+        ser = open_serial(port, timeout)
+        start_rpc_session(ser)
+        send_start_screen_stream(ser)
+        streaming = True
+        send_device_info_request(ser)
+        try:
+            frame_data, device_name = read_frame_and_device_name(ser, timeout)
+        except TimeoutError:
+            frame_data, device_name = None, "unknown"
+        frame_data = require_frame(frame_data)
+
+        while True:
+            saved += 1
+            path = save_frame(
+                frame_data,
+                device_name,
+                output,
+                saved if output is not None else None,
+            )
+            progress = f"{saved}" if infinite else f"{saved}/{count}"
+            print(f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {path} ({progress})")
+            if stop.requested or (not infinite and saved >= count):
+                break
+            frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data, stop)
+    except KeyboardInterrupt:
+        print(f"\n{_stopped_message(saved)}")
+        return 0
+    except BurstStopped:
+        print(_stopped_message(saved))
+        return 0
+    finally:
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
+        if ser is not None:
+            if streaming:
+                try:
+                    send_stop_screen_stream(ser)
+                except (serial.SerialException, TimeoutError, OSError):
+                    pass
+            ser.close()
+
+    if stop.requested:
+        print(_stopped_message(saved))
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -393,10 +567,20 @@ def _version_string() -> str:
         return "0.0.0-dev"
 
 
-def parse_args(argv=None) -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
-        description="Grab one frame from a Flipper Zero's screen and save it as a PNG.",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [port] [output]",
+        description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  flipshot\n"
+            "  flipshot -b\n"
+            "  flipshot -b 20 250\n"
+            "  flipshot --burst -1 100\n"
+            "  flipshot /dev/cu.usbmodemflip_XXXX1 shot.png -b 5 500"
+        ),
     )
     parser.add_argument(
         "port",
@@ -409,12 +593,114 @@ def parse_args(argv=None) -> argparse.Namespace:
         "output",
         nargs="?",
         default=None,
-        help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png)",
+        help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png). "
+        "With --burst and an explicit path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {_version_string()}"
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {_version_string()}",
     )
-    return parser.parse_args(argv)
+    # Values are parsed in _extract_burst_tokens. Registered here so -b/--burst
+    # shows up in help; argparse would treat N=-1 as a flag and would also
+    # swallow the port and output paths.
+    parser.add_argument(
+        "-b",
+        "--burst",
+        dest="_burst_flag",
+        action="store_true",
+        help=(
+            "Capture N screenshots, pausing M milliseconds between them. "
+            f"N defaults to {BURST_DEFAULT_COUNT}; -1 keeps going until the script is stopped. "
+            f"M defaults to {BURST_DEFAULT_PAUSE_MS} and must be from "
+            f"{BURST_MIN_PAUSE_MS} to {BURST_MAX_PAUSE_MS}."
+        ),
+    )
+    return parser
+
+
+def _is_int_token(token: str) -> bool:
+    try:
+        int(token, 10)
+    except ValueError:
+        return False
+    return True
+
+
+def _extract_burst_tokens(argv, parser):
+    """Pull -b/--burst and up to two integer arguments out of argv.
+
+    Returns (tokens or None, remaining argv). None means the flag was absent.
+    Only integer tokens are consumed, so a port path after -b stays positional,
+    and -1 is accepted as "run until stopped".
+    """
+    remaining = []
+    tokens = None
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg not in ("-b", "--burst") and not arg.startswith("--burst="):
+            remaining.append(arg)
+            index += 1
+            continue
+        if tokens is not None:
+            parser.error("-b/--burst can only be specified once")
+        tokens = []
+        if arg.startswith("--burst="):
+            inline = arg.split("=", 1)[1]
+            if inline != "":
+                tokens.append(inline)
+        index += 1
+        while index < len(argv) and len(tokens) < 2 and _is_int_token(argv[index]):
+            tokens.append(argv[index])
+            index += 1
+        if index < len(argv) and _is_int_token(argv[index]):
+            parser.error("-b/--burst accepts at most 2 values: N and M")
+    return tokens, remaining
+
+
+def _validate_burst(tokens, parser):
+    if tokens is None:
+        return None
+    count = BURST_DEFAULT_COUNT
+    pause_ms = BURST_DEFAULT_PAUSE_MS
+    if len(tokens) >= 1:
+        try:
+            count = int(tokens[0], 10)
+        except ValueError:
+            parser.error(f"N must be an integer number of screenshots, got {tokens[0]!r}")
+    if len(tokens) >= 2:
+        try:
+            pause_ms = int(tokens[1], 10)
+        except ValueError:
+            parser.error(f"M must be an integer number of milliseconds, got {tokens[1]!r}")
+    if count != -1 and count < 1:
+        parser.error("N must be a positive number of screenshots, or -1 to keep going until stopped")
+    if pause_ms < BURST_MIN_PAUSE_MS or pause_ms > BURST_MAX_PAUSE_MS:
+        parser.error(
+            f"M must be between {BURST_MIN_PAUSE_MS} and {BURST_MAX_PAUSE_MS} milliseconds"
+        )
+    return count, pause_ms
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = _build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+    burst_tokens, remaining = _extract_burst_tokens(list(argv), parser)
+    args = parser.parse_args(remaining)
+    args.burst = _validate_burst(burst_tokens, parser)
+    del args._burst_flag
+    return args
+
+
+def capture_once(port: str, output: Optional[str]) -> int:
+    frame_data, device_name = grab_screen_frame(port)
+    out_path = output if output is not None else default_output_path(device_name)
+    save_png(out_path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H)
+    print(f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {out_path}")
+    return 0
 
 
 def main() -> int:
@@ -431,11 +717,22 @@ def main() -> int:
                 "  flipshot /dev/cu.usbmodemflip_YourName1"
             )
 
-    out_path = args.output
+    if args.burst is not None:
+        count, pause_ms = args.burst
+        if count < 0:
+            print(
+                f"Capturing screenshots until stopped, {pause_ms} ms apart. "
+                "Press Ctrl+C to stop."
+            )
+        else:
+            print(f"Capturing {count} screenshots, {pause_ms} ms apart.")
 
     print(f"Connecting to {port} ...")
     try:
-        frame_data, device_name = grab_screen_frame(port)
+        if args.burst is None:
+            return capture_once(port, args.output)
+        count, pause_ms = args.burst
+        return capture_burst(port, count, pause_ms, args.output)
     except serial.SerialException as exc:
         quit_message(
             f"Could not open {port}: {exc}\n"
@@ -448,13 +745,6 @@ def main() -> int:
         )
     except RuntimeError as exc:
         quit_message(str(exc))
-
-    if out_path is None:
-        out_path = default_output_path(device_name)
-    pixels = frame_to_pixels(frame_data)
-    save_png(out_path, pixels, SCREEN_W, SCREEN_H)
-    print(f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {out_path}")
-    return 0
 
 
 if __name__ == "__main__":
