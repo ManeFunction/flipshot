@@ -6,20 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- PNG output is now 1-bit grayscale instead of 8-bit grayscale (about a 20% smaller file).
 
 ## [1.1.0] - 2026-09-23
 ### Added
 - `-b` / `--burst [N] [M]` captures N screenshots with M milliseconds between them.
-  N defaults to 10 and can be `-1` to run until the script is stopped. M defaults to 1000,
-  in the range 100–5000.
+  N defaults to 10, and `-1` keeps capturing until the script is stopped. M defaults to 1000
+  and must be in the range 100–5000.
 - `-v` as the short form of `--version`.
 
 ## [1.0.1] - 2026-09-22
 ### Fixed
-- `is_flipper_port` referenced `serial.tools.list_ports.ListPortInfo`, which doesn't exist on that module
-  (the class actually lives in `serial.tools.list_ports_common`). This crashed on import on any Python
-  version that evaluates annotations eagerly (≤3.12) — including the Homebrew formula, which pins
-  `python@3.12`.
+- `is_flipper_port` referenced `serial.tools.list_ports.ListPortInfo`, which doesn't exist in that module
+  (the class lives in `serial.tools.list_ports_common`). This crashed on import for any Python
+  version that evaluates annotations eagerly (≤3.12), including Python 3.12, which the Homebrew formula pins.
 
 ## [1.0.0] - 2026-09-21
-Initial release
+Initial release.

@@ -541,13 +541,23 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
 
 
 def save_png(path: str, pixels: bytes, width: int, height: int) -> None:
-    """Write an 8-bit grayscale PNG using only the standard library."""
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    """Write a 1-bit grayscale PNG using only the standard library. Every
+    pixel here is already pure black (0x00) or white (0xff), so bit depth 1
+    is both smaller and more correct than 8-bit grayscale -- and it beats a
+    2-color indexed palette too, since indexed needs this same 1-bit packing
+    plus an extra PLTE chunk, for no compression benefit on strictly
+    bilevel content."""
+    ihdr = struct.pack(">IIBBBBB", width, height, 1, 0, 0, 0, 0)
 
+    row_bytes = (width + 7) // 8
     raw = bytearray()
     for y in range(height):
         raw.append(0)  # filter type: None
-        raw.extend(pixels[y * width:(y + 1) * width])
+        row = bytearray(row_bytes)
+        for x in range(width):
+            if pixels[y * width + x] != 0:  # non-zero (0xff) = white = bit 1
+                row[x // 8] |= 0x80 >> (x % 8)
+        raw.extend(row)
     idat = zlib.compress(bytes(raw), 9)
 
     with open(path, "wb") as f:
