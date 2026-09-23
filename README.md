@@ -4,6 +4,8 @@ Grab one frame from a [Flipper Zero](https://flipperzero.one/)'s screen over USB
 save it as a native-resolution (128x64) black & white PNG — no qFlipper, no companion app,
 just a serial cable and this script.
 
+<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-1.png"></picture> <picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-2.png"></picture> <a href="https://github.com/ManeFunction/clock-o-dial--fz"><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-3.png" alt="clock-o-dial"></a> <picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-4.png"></picture>
+
 
 ## Installation
 
