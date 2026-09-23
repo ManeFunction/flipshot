@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-09-23
 ### Added
 - `-b` / `--burst [N] [M]` captures N screenshots with M milliseconds between them.
   N defaults to 10 and can be `-1` to run until the script is stopped. M defaults to 1000,
