@@ -82,3 +82,9 @@ library plus [pyserial](https://pypi.org/project/pyserial/); no image library re
 ## Repository info
 
 This repo follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/ManeFunction/flipshot)](https://github.com/ManeFunction/flipshot/releases/latest)
+[![GitHub All Releases](https://img.shields.io/github/downloads/ManeFunction/flipshot/total)](https://github.com/ManeFunction/flipshot/releases)
+[![PyPI version](https://img.shields.io/pypi/v/flipshot)](https://pypi.org/project/flipshot/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/flipshot)](https://pypi.org/project/flipshot/)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/ManeFunction?label=Sponsor&logo=GitHubSponsors&style=flat)](https://github.com/sponsors/ManeFunction)
