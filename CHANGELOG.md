@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 ### Changed
 - PNG output is now 1-bit grayscale instead of 8-bit grayscale (about a 20% smaller file).
+- **Breaking:** output path is now an explicit `-o`/`--output` flag instead of the second positional
+  argument. `flipshot port output.png` no longer works - use `flipshot port -o output.png` instead.
+  This also makes it possible to set the output path without specifying a port: `flipshot -o output.png`.
 
 ## [1.1.0] - 2026-09-23
 ### Added

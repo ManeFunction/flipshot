@@ -20,13 +20,13 @@ just a serial cable and this script.
       manager, typing `pip install flipshot` in the Terminal. For Mac users, you may need to use `pip3` instead
       of `pip`.
     - Verify the installation with `flipshot --version`.
-    - You are perfect, you can use the app with `flipshot [port] [output.png]` from any folder in your system.
+    - You are perfect, you can use the app with `flipshot` from any folder in your system.
 2) **brew (Recommended for Mac and Linux users)**
     - Type `brew tap manefunction/tap` in your Terminal to add my custom tap (app source) to your brew sources,
       if you haven't already.
     - Type `brew install flipshot` to install the application itself.
     - Verify the installation with `flipshot --version`.
-    - You are perfect, you can use the app with `flipshot [port] [output.png]` from any folder in your system.
+    - You are perfect, you can use the app with `flipshot` from any folder in your system.
 3) **Python package (manual installation, for advanced users)**
     - Clone the repository or download the source code from GitHub.
     - Go to the folder with the script in your Terminal.
@@ -38,7 +38,7 @@ just a serial cable and this script.
       you run it — click "More info" → "Run anyway" to proceed.
     - Open Command Prompt or PowerShell, `cd` to the folder with `flipshot.exe`, and run `.\flipshot.exe --version`
       to verify it works.
-    - You are perfect, you can use the app with `.\flipshot.exe [port] [output.png]`.
+    - You are perfect, you can use the app with `.\flipshot.exe`.
 5) **Python script (manual usage, for advanced users)**
     - If you are familiar with Python scripts, venv, and dependencies, you can simply clone the repository,
       `pip3 install pyserial`, and run `src/flipshot.py` directly. Feel free to modify the script for yourself.
@@ -47,14 +47,14 @@ just a serial cable and this script.
 ## Usage
 
 ```
-flipshot [-h] [-v] [-b [N] [M]] [serial_port] [output.png]
+flipshot [-h] [-v] [-b [N] [M]] [-o OUTPUT] [serial_port]
 ```
 
 - `-h`, `--help` — show the help text and exit.
 - `-v`, `--version` — print the version and exit.
 - `serial_port` is optional — flipshot auto-detects a connected Flipper Zero over USB.
   Pass it explicitly if auto-detection fails, e.g. `flipshot /dev/cu.usbmodemflip_XXXX1`.
-- `output.png` is optional — defaults to `flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png`
+- `-o`, `--output` is optional — defaults to `flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png`
   in the current folder. With `--burst` and an explicit path, files are numbered:
   `shot.png` becomes `shot-1.png`, `shot-2.png`, and so on.
 - `-b`, `--burst [N] [M]` — take N screenshots, pausing M milliseconds between them.

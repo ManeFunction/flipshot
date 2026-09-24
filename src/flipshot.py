@@ -13,10 +13,10 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [-v] [-b [N] [M]] [serial_port] [output.png]
+    flipshot [-v] [-b [N] [M]] [-o output.png] [serial_port]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
-If output.png is omitted, the file name is
+If -o/--output is omitted, the file name is
 flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png
 
 -b, --burst [N] [M] saves N screenshots, pausing M milliseconds between them.
@@ -580,7 +580,7 @@ def _version_string() -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
-        usage="%(prog)s [-h] [-v] [-b [N] [M]] [port] [output]",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-o OUTPUT] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -589,7 +589,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  flipshot -b\n"
             "  flipshot -b 20 250\n"
             "  flipshot --burst -1 100\n"
-            "  flipshot /dev/cu.usbmodemflip_XXXX1 shot.png -b 5 500"
+            "  flipshot -o shot.png\n"
+            "  flipshot /dev/cu.usbmodemflip_XXXX1 -o shot.png -b 5 500"
         ),
     )
     parser.add_argument(
@@ -600,8 +601,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "e.g. /dev/cu.usbmodemflip_XXXX1",
     )
     parser.add_argument(
-        "output",
-        nargs="?",
+        "-o",
+        "--output",
         default=None,
         help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png). "
         "With --burst and an explicit path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
