@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.2.0] - 2026-09-24
 ### Changed
 - PNG output is now 1-bit grayscale instead of 8-bit grayscale (about a 20% smaller file).
 - **Breaking:** output path is now an explicit `-o`/`--output` flag instead of the second positional
