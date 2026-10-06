@@ -9,9 +9,9 @@ It's very good for manual UI prototyping and back-and-forth overpainting in apps
 
 Here are some examples:
 
-<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-1.png"></picture>&nbsp;&nbsp;<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-2.png"></picture>&nbsp;&nbsp;<a href="https://github.com/ManeFunction/clock-o-dial--fz"><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-3.png" alt="clock-o-dial"></a>&nbsp;&nbsp;<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-4.png"></picture>
+![](https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-1.png)&nbsp;&nbsp;![](https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-2.png)&nbsp;&nbsp;![](https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-3.png)&nbsp;&nbsp;![](https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-4.png)
 
-![](https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-big.png)
+<a href="https://github.com/ManeFunction/clock-o-dial--fz"><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-big.png" alt="clock-o-dial"></a>
 
 ## Installation
 
