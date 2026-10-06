@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- `-s` / `--scale` now takes a plain number: `-s 3` instead of `-s x3`. The `x3` form is still accepted.
 
 ## [1.3.0] - 2026-10-06
 ### Added

@@ -13,7 +13,7 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [-v] [-b [N] [M]] [-s xN] [-p] [-o output.png] [serial_port]
+    flipshot [-v] [-b [N] [M]] [-s N] [-p] [-o output.png] [serial_port]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
 If -o/--output is omitted, the file name is
@@ -25,8 +25,8 @@ slash, which is created), the file is saved there under that default name.
 N defaults to 10 (-1 keeps going until the script is stopped). M defaults to
 1000 and must be between 100 and 5000.
 
--s, --scale xN enlarges the image N times (N from 1 to 10), so every Flipper
-pixel becomes an NxN block, e.g. -s x3.
+-s, --scale N enlarges the image N times (N from 1 to 10), so every Flipper
+pixel becomes an NxN block, e.g. -s 3.
 -p, --paint draws the screen in Flipper's own colors (orange background
 instead of white).
 """
@@ -640,7 +640,7 @@ def _version_string() -> str:
 def _parse_scale(value: str) -> int:
     match = re.fullmatch(r"[xX]?(\d+)", value.strip())
     if match is None:
-        raise argparse.ArgumentTypeError(f"expected xN, e.g. x3, got {value!r}")
+        raise argparse.ArgumentTypeError(f"expected a whole number, e.g. 3, got {value!r}")
     scale = int(match.group(1))
     if scale < SCALE_MIN or scale > SCALE_MAX:
         raise argparse.ArgumentTypeError(
@@ -652,7 +652,7 @@ def _parse_scale(value: str) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
-        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [port]",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s N] [-p] [-o OUTPUT] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -663,8 +663,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  flipshot --burst -1 100\n"
             "  flipshot -o shot.png\n"
             "  flipshot -o ~/Pictures/flipper/\n"
-            "  flipshot -s x4 -p\n"
-            "  flipshot /dev/cu.usbmodemflip_XXXX1 -o shot.png -b 5 500 -s x3"
+            "  flipshot -s 4 -p\n"
+            "  flipshot /dev/cu.usbmodemflip_XXXX1 -o shot.png -b 5 500 -s 3"
         ),
     )
     parser.add_argument(
@@ -687,9 +687,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--scale",
         type=_parse_scale,
         default=1,
-        metavar="xN",
+        metavar="N",
         help=f"Enlarge the image N times, N from {SCALE_MIN} to {SCALE_MAX}: "
-        "every Flipper pixel becomes an NxN block, e.g. -s x3 gives 384x192 (default: x1)",
+        "every Flipper pixel becomes an NxN block, e.g. -s 3 gives 384x192 (default: 1)",
     )
     parser.add_argument(
         "-p",

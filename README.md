@@ -53,7 +53,7 @@ Here are some examples:
 ## Usage
 
 ```
-flipshot [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [serial_port]
+flipshot [-h] [-v] [-b [N] [M]] [-s N] [-p] [-o OUTPUT] [serial_port]
 ```
 
 - `-h`, `--help` — show the help text and exit.
@@ -68,8 +68,8 @@ flipshot [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [serial_port]
 - `-b`, `--burst [N] [M]` — take N screenshots, pausing M milliseconds between them.
   N defaults to 10. `-1` keeps capturing until you stop the script (Ctrl+C).
   M defaults to 1000 and must be between 100 and 5000.
-- `-s`, `--scale xN` — enlarge the image N times (N from 1 to 10), so every Flipper pixel becomes
-  an NxN block: `-s x3` gives a 384x192 image. Defaults to `x1` (native 128x64).
+- `-s`, `--scale N` — enlarge the image N times (N from 1 to 10), so every Flipper pixel becomes
+  an NxN block: `-s 3` gives a 384x192 image. Defaults to `1` (native 128x64).
 - `-p`, `--paint` — use the Flipper's own colors: the white background becomes orange (`#fe8a2c`).
   The image is saved as a 2-color indexed PNG instead of grayscale.
 
@@ -77,7 +77,7 @@ flipshot [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [serial_port]
 flipshot -b
 flipshot -b 20 250
 flipshot --burst -1 100
-flipshot -s x4 -p    // the same format (visually) qFlipper do
+flipshot -s 4 -p    // the same format (visually) qFlipper do
 ```
 
 Close qFlipper or any other serial terminal connected to the Flipper before running flipshot —
