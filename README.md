@@ -75,7 +75,7 @@ flipshot [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [serial_port]
 flipshot -b
 flipshot -b 20 250
 flipshot --burst -1 100
-flipshot -s x4 -p    // the same format qFlipper do
+flipshot -s x4 -p    // the same format (visually) qFlipper do
 ```
 
 Close qFlipper or any other serial terminal connected to the Flipper before running flipshot —
@@ -90,7 +90,7 @@ pixel, and the PNG type depends on the options:
 | Options | PNG type | Colors | Notes |
 |---|---|---|---|
 | *(default)* | 1-bit grayscale | black and white | No palette; the single bit is the shade itself (0 = black, 1 = white). |
-| `-p`, `--paint` | 1-bit indexed (2-color palette) | black and orange `#fe8a2c` | Still 1 bit per pixel; a tiny `PLTE` chunk maps bit 0 to black and bit 1 to orange. |
+| `--paint` | 1-bit indexed (2-color palette) | black and orange `#fe8a2c` | Still 1 bit per pixel; a tiny `PLTE` chunk maps bit 0 to black and bit 1 to orange. |
 
 - **Compared to qFlipper:** qFlipper saves screenshots in the RGB color space, which spends 24 bits on every
   pixel. flipshot's files use 1 bit per pixel, so they are much lighter.
