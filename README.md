@@ -5,6 +5,8 @@ save it as a native-resolution (128x64) black & white PNG (optionally scaled up 
 the Flipper's orange) - no qFlipper, no companion app,
 just a USB cable and this script.
 
+It's very good for manual UI prototyping and back-and-forth overpainting in apps like [Aseprite](https://store.steampowered.com/app/431730/Aseprite/), or as instant visual feedback so your AI can actually see your Flipper Zero's screen.
+
 Here are some examples:
 
 <picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-1.png"></picture>&nbsp;&nbsp;<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-2.png"></picture>&nbsp;&nbsp;<a href="https://github.com/ManeFunction/clock-o-dial--fz"><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-3.png" alt="clock-o-dial"></a>&nbsp;&nbsp;<picture><img src="https://raw.githubusercontent.com/wiki/ManeFunction/flipshot/flipshot-4.png"></picture>
