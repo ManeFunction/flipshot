@@ -92,7 +92,7 @@ pixel, and the PNG type depends on the options:
 | Options | PNG type | Colors | Notes |
 |---|---|---|---|
 | *(default)* | 1-bit grayscale | black and white | No palette; the single bit is the shade itself (0 = black, 1 = white). |
-| `--paint` | 1-bit indexed (2-color palette) | black and orange `#fe8a2c` | Still 1 bit per pixel; a tiny `PLTE` chunk maps bit 0 to black and bit 1 to orange. |
+| `-p` | 1-bit indexed (2-color palette) | black and orange `#fe8a2c` | Still 1 bit per pixel; a tiny `PLTE` chunk maps bit 0 to black and bit 1 to orange. |
 
 - **Compared to qFlipper:** qFlipper saves screenshots in the RGB color space, which spends 24 bits on every
   pixel. flipshot's files use 1 bit per pixel, so they are much lighter.
