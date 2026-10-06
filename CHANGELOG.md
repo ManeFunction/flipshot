@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-06
+### Added
+- `-s` / `--scale xN` enlarges the screenshot N times (N from 1 to 10), so each Flipper pixel becomes
+  an NxN block, e.g. `-s x3` gives 384x192.
+- `-p` / `--paint` draws the screenshot in the Flipper's own colors (orange `#fe8a2c` background instead
+  of white), saved as a 2-color indexed PNG.
+
+### Changed
+- `-o` / `--output` can now point to a folder (an existing one, or a path ending with a slash, which is
+  created): the screenshot is saved there under the default timestamped name.
+
 ## [1.2.0] - 2026-09-24
 ### Changed
 - PNG output is now 1-bit grayscale instead of 8-bit grayscale (about a 20% smaller file).

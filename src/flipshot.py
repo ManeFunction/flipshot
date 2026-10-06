@@ -13,15 +13,22 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [-v] [-b [N] [M]] [-o output.png] [serial_port]
+    flipshot [-v] [-b [N] [M]] [-s xN] [-p] [-o output.png] [serial_port]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
 If -o/--output is omitted, the file name is
 flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png
+If -o/--output is a folder (an existing directory, or a path ending with a
+slash, which is created), the file is saved there under that default name.
 
 -b, --burst [N] [M] saves N screenshots, pausing M milliseconds between them.
 N defaults to 10 (-1 keeps going until the script is stopped). M defaults to
 1000 and must be between 100 and 5000.
+
+-s, --scale xN enlarges the image N times (N from 1 to 10), so every Flipper
+pixel becomes an NxN block, e.g. -s x3.
+-p, --paint draws the screen in Flipper's own colors (orange background
+instead of white).
 """
 
 import argparse
@@ -66,6 +73,13 @@ BURST_DEFAULT_PAUSE_MS = 1000
 BURST_MIN_PAUSE_MS = 100
 BURST_MAX_PAUSE_MS = 5000
 FRAME_BYTES = (SCREEN_W * SCREEN_H) // 8
+
+SCALE_MIN = 1
+SCALE_MAX = 10
+
+# Flipper's LCD: black pixels on an orange backlight.
+PAINT_INK = (0x00, 0x00, 0x00)
+PAINT_BACKGROUND = (0xFE, 0x8A, 0x2C)
 
 
 # ---------------------------------------------------------------------------
@@ -425,15 +439,39 @@ def numbered_output_path(output: str, index: int) -> str:
     return f"{root}-{index}{ext}"
 
 
-def save_frame(frame_data: bytes, device_name: str, output: Optional[str], index: Optional[int]) -> str:
+def is_output_folder(output: Optional[str]) -> bool:
+    """True if -o names a folder rather than a file: an existing directory, or
+    any path written with a trailing separator (which is created on demand)."""
     if output is None:
+        return False
+    return output.endswith(("/", os.sep)) or os.path.isdir(output)
+
+
+def save_frame(
+    frame_data: bytes,
+    device_name: str,
+    output: Optional[str],
+    index: Optional[int],
+    scale: int = 1,
+    paint: bool = False,
+) -> str:
+    if is_output_folder(output):
+        os.makedirs(output, exist_ok=True)
+        path = os.path.join(output, default_output_path(device_name))
+    elif output is None:
         path = default_output_path(device_name)
     elif index is None:
         path = output
     else:
         path = numbered_output_path(output, index)
-    save_png(path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H)
+    save_png(path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H, scale, paint)
     return path
+
+
+def saved_message(path: str, scale: int) -> str:
+    if scale == 1:
+        return f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {path}"
+    return f"Saved {SCREEN_W * scale}x{SCREEN_H * scale} PNG (x{scale}) to {path}"
 
 
 def _stopped_message(saved: int) -> str:
@@ -449,6 +487,8 @@ def capture_burst(
     count: int,
     pause_ms: int,
     output: Optional[str],
+    scale: int = 1,
+    paint: bool = False,
     timeout: float = 5.0,
 ) -> int:
     infinite = count < 0
@@ -480,10 +520,12 @@ def capture_burst(
                 frame_data,
                 device_name,
                 output,
-                saved if output is not None else None,
+                saved if output is not None and not is_output_folder(output) else None,
+                scale,
+                paint,
             )
             progress = f"{saved}" if infinite else f"{saved}/{count}"
-            print(f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {path} ({progress})")
+            print(f"{saved_message(path, scale)} ({progress})")
             if stop.requested or (not infinite and saved >= count):
                 break
             frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data, stop)
@@ -540,29 +582,47 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     )
 
 
-def save_png(path: str, pixels: bytes, width: int, height: int) -> None:
-    """Write a 1-bit grayscale PNG using only the standard library. Every
-    pixel here is already pure black (0x00) or white (0xff), so bit depth 1
-    is both smaller and more correct than 8-bit grayscale -- and it beats a
-    2-color indexed palette too, since indexed needs this same 1-bit packing
-    plus an extra PLTE chunk, for no compression benefit on strictly
-    bilevel content."""
-    ihdr = struct.pack(">IIBBBBB", width, height, 1, 0, 0, 0, 0)
+def save_png(
+    path: str,
+    pixels: bytes,
+    width: int,
+    height: int,
+    scale: int = 1,
+    paint: bool = False,
+) -> None:
+    """Write a 1-bit PNG using only the standard library. Every pixel here is
+    already pure black (0x00) or white (0xff), so bit depth 1 is both smaller
+    and more correct than 8-bit grayscale.
 
-    row_bytes = (width + 7) // 8
+    scale enlarges the image so each source pixel becomes a scale x scale block.
+    paint switches from 1-bit grayscale to a 2-color indexed palette (black ink
+    on Flipper's orange background), which costs one extra PLTE chunk but keeps
+    the same 1-bit packing."""
+    out_w = width * scale
+    out_h = height * scale
+    if paint:
+        color_type = 3  # indexed; palette index 0 = ink, 1 = background
+    else:
+        color_type = 0  # grayscale; sample 0 = black, 1 = white
+    ihdr = struct.pack(">IIBBBBB", out_w, out_h, 1, color_type, 0, 0, 0)
+
+    row_bytes = (out_w + 7) // 8
     raw = bytearray()
     for y in range(height):
-        raw.append(0)  # filter type: None
         row = bytearray(row_bytes)
         for x in range(width):
             if pixels[y * width + x] != 0:  # non-zero (0xff) = white = bit 1
-                row[x // 8] |= 0x80 >> (x % 8)
-        raw.extend(row)
+                for sx in range(x * scale, (x + 1) * scale):
+                    row[sx // 8] |= 0x80 >> (sx % 8)
+        line = b"\x00" + bytes(row)  # filter type: None
+        raw.extend(line * scale)
     idat = zlib.compress(bytes(raw), 9)
 
     with open(path, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n")
         f.write(_png_chunk(b"IHDR", ihdr))
+        if paint:
+            f.write(_png_chunk(b"PLTE", bytes(PAINT_INK + PAINT_BACKGROUND)))
         f.write(_png_chunk(b"IDAT", idat))
         f.write(_png_chunk(b"IEND", b""))
 
@@ -577,10 +637,22 @@ def _version_string() -> str:
         return "0.0.0-dev"
 
 
+def _parse_scale(value: str) -> int:
+    match = re.fullmatch(r"[xX]?(\d+)", value.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(f"expected xN, e.g. x3, got {value!r}")
+    scale = int(match.group(1))
+    if scale < SCALE_MIN or scale > SCALE_MAX:
+        raise argparse.ArgumentTypeError(
+            f"N must be between {SCALE_MIN} and {SCALE_MAX}, got {scale}"
+        )
+    return scale
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
-        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-o OUTPUT] [port]",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s xN] [-p] [-o OUTPUT] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -590,7 +662,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "  flipshot -b 20 250\n"
             "  flipshot --burst -1 100\n"
             "  flipshot -o shot.png\n"
-            "  flipshot /dev/cu.usbmodemflip_XXXX1 -o shot.png -b 5 500"
+            "  flipshot -o ~/Pictures/flipper/\n"
+            "  flipshot -s x4 -p\n"
+            "  flipshot /dev/cu.usbmodemflip_XXXX1 -o shot.png -b 5 500 -s x3"
         ),
     )
     parser.add_argument(
@@ -604,8 +678,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         default=None,
-        help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png). "
-        "With --burst and an explicit path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
+        help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png), "
+        "or a folder to save the default-named file into (created if the path ends with a slash). "
+        "With --burst and an explicit file path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
+    )
+    parser.add_argument(
+        "-s",
+        "--scale",
+        type=_parse_scale,
+        default=1,
+        metavar="xN",
+        help=f"Enlarge the image N times, N from {SCALE_MIN} to {SCALE_MAX}: "
+        "every Flipper pixel becomes an NxN block, e.g. -s x3 gives 384x192 (default: x1)",
+    )
+    parser.add_argument(
+        "-p",
+        "--paint",
+        action="store_true",
+        help="Use Flipper's own colors: orange (#fe8a2c) background instead of white",
     )
     parser.add_argument(
         "-v",
@@ -706,11 +796,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
-def capture_once(port: str, output: Optional[str]) -> int:
+def capture_once(port: str, output: Optional[str], scale: int = 1, paint: bool = False) -> int:
     frame_data, device_name = grab_screen_frame(port)
-    out_path = output if output is not None else default_output_path(device_name)
-    save_png(out_path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H)
-    print(f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {out_path}")
+    out_path = save_frame(frame_data, device_name, output, None, scale, paint)
+    print(saved_message(out_path, scale))
     return 0
 
 
@@ -741,9 +830,9 @@ def main() -> int:
     print(f"Connecting to {port} ...")
     try:
         if args.burst is None:
-            return capture_once(port, args.output)
+            return capture_once(port, args.output, args.scale, args.paint)
         count, pause_ms = args.burst
-        return capture_burst(port, count, pause_ms, args.output)
+        return capture_burst(port, count, pause_ms, args.output, args.scale, args.paint)
     except serial.SerialException as exc:
         quit_message(
             f"Could not open {port}: {exc}\n"
