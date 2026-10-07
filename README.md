@@ -65,11 +65,11 @@ flipshot [-h] [-v] [-b [N] [M]] [-s N] [-p] [-o OUTPUT] [serial_port]
   is created), the screenshot is saved there under the default name: `flipshot -o ~/Pictures/flipper/`.
   With `--burst` and an explicit file path, files are numbered: `shot.png` becomes `shot-1.png`,
   `shot-2.png`, and so on; with a folder, every file gets its own timestamped default name.
-- `-b`, `--burst [N] [M]` — take N screenshots, pausing M milliseconds between them.
+- `-b [N] [M]`, `--burst [N] [M]` — take N screenshots, pausing M milliseconds between them.
   N defaults to 10. `-1` keeps capturing until you stop the script (Ctrl+C).
   M defaults to 1000 and must be between 100 and 5000.
-- `-s`, `--scale N` — enlarge the image N times (N from 1 to 10), so every Flipper pixel becomes
-  an NxN block: `-s 3` gives a 384x192 image. Defaults to `1` (native 128x64).
+- `-s [X]`, `--scale [X]` — enlarge the image X times (X from 1 to 10), so every Flipper pixel becomes
+  an XxX block: `-s 3` gives a 384x192 image. Defaults to `1` (native 128x64).
 - `-p`, `--paint` — use the Flipper's own colors: the white background becomes orange (`#fe8a2c`).
   The image is saved as a 2-color indexed PNG instead of grayscale.
 

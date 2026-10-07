@@ -13,7 +13,7 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [-v] [-b [N] [M]] [-s N] [-p] [-o output.png] [serial_port]
+    flipshot [-v] [-b [N] [M]] [-s [X]] [-p] [-o output.png] [serial_port]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
 If -o/--output is omitted, the file name is
@@ -21,12 +21,12 @@ flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png
 If -o/--output is a folder (an existing directory, or a path ending with a
 slash, which is created), the file is saved there under that default name.
 
--b, --burst [N] [M] saves N screenshots, pausing M milliseconds between them.
+-b [N] [M], --burst [N] [M] saves N screenshots, pausing M milliseconds between them.
 N defaults to 10 (-1 keeps going until the script is stopped). M defaults to
 1000 and must be between 100 and 5000.
 
--s, --scale N enlarges the image N times (N from 1 to 10), so every Flipper
-pixel becomes an NxN block, e.g. -s 3.
+-s [X], --scale [X] enlarges the image X times (X from 1 to 10), so every Flipper
+pixel becomes an XxX block, e.g. -s 3.
 -p, --paint draws the screen in Flipper's own colors (orange background
 instead of white).
 """
@@ -652,9 +652,11 @@ def _parse_scale(value: str) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
-        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s N] [-p] [-o OUTPUT] [port]",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s [X]] [-p] [-o [OUTPUT]] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=lambda prog: argparse.RawDescriptionHelpFormatter(
+            prog, max_help_position=30
+        ),
         epilog=(
             "examples:\n"
             "  flipshot\n"
@@ -678,6 +680,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         default=None,
+        metavar="[OUTPUT]",
         help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png), "
         "or a folder to save the default-named file into (created if the path ends with a slash). "
         "With --burst and an explicit file path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
@@ -687,9 +690,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--scale",
         type=_parse_scale,
         default=1,
-        metavar="N",
-        help=f"Enlarge the image N times, N from {SCALE_MIN} to {SCALE_MAX}: "
-        "every Flipper pixel becomes an NxN block, e.g. -s 3 gives 384x192 (default: 1)",
+        metavar="[X]",
+        help=f"Enlarge the image X times, X from {SCALE_MIN} to {SCALE_MAX}: "
+        "every Flipper pixel becomes an XxX block, e.g. -s 3 gives 384x192 (default: 1)",
     )
     parser.add_argument(
         "-p",
@@ -705,12 +708,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # Values are parsed in _extract_burst_tokens. Registered here so -b/--burst
     # shows up in help; argparse would treat N=-1 as a flag and would also
-    # swallow the port and output paths.
+    # swallow the port and output paths. argparse never sees -b, so the action
+    # only shapes the help entry.
     parser.add_argument(
         "-b",
         "--burst",
+        metavar="[N] [M]",
         dest="_burst_flag",
-        action="store_true",
         help=(
             "Capture N screenshots, pausing M milliseconds between them. "
             f"N defaults to {BURST_DEFAULT_COUNT}; -1 keeps going until the script is stopped. "
