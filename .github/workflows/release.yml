@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: python -m pip install --upgrade pip pyserial nuitka
@@ -68,7 +68,7 @@ jobs:
           path: dist/flipshot.exe
 
   publish-pypi:
-    needs: build
+    needs: [build, windows-exe] # don't publish if the (flakiest) exe build failed
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -80,6 +80,8 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true # makes re-running a partly failed release safe
 
   github-release:
     needs: [publish-pypi, windows-exe]
