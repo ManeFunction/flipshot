@@ -44,13 +44,23 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip pyserial nuitka
 
+      # The exe is built from source, so there is no package metadata for
+      # --version to read. Bake the tag's version in instead.
+      - name: Stamp version from tag
+        shell: bash
+        run: sed -i "s/\"0\.0\.0-dev\"/\"${GITHUB_REF_NAME#v}\"/" src/flipshot.py
+
       - name: Build standalone exe
         run: >
           python -m nuitka --onefile --assume-yes-for-downloads
           --output-filename=flipshot.exe --output-dir=dist src/flipshot.py
 
       - name: Smoke test the exe
-        run: dist/flipshot.exe --version
+        shell: bash
+        run: |
+          out=$(dist/flipshot.exe --version)
+          echo "$out"
+          test "$out" = "flipshot ${GITHUB_REF_NAME#v}"
 
       - uses: actions/upload-artifact@v7
         with:
