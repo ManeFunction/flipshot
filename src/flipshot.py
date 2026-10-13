@@ -297,21 +297,42 @@ def write_message(ser: serial.Serial, body: bytes):
     ser.flush()
 
 
-def read_message(ser: serial.Serial) -> bytes:
-    def read_byte():
-        b = ser.read(1)
-        if not b:
-            raise TimeoutError("Serial read timed out waiting for RPC data")
-        return b[0]
+def read_message(ser: serial.Serial, body_timeout: float = 2.0) -> bytes:
+    """Read one length-prefixed RPC message.
 
-    length = read_varint(read_byte)
-    data = b""
-    while len(data) < length:
-        chunk = ser.read(length - len(data))
-        if not chunk:
-            raise TimeoutError("Serial read timed out mid-message")
-        data += chunk
-    return data
+    A timeout before the first byte is harmless (TimeoutError, nothing consumed).
+    Once the message has started, the rest gets at least body_timeout seconds,
+    and running out of time then is an error: carrying on would leave a half-read
+    message in the buffer and misread everything after it.
+    """
+    first = ser.read(1)
+    if not first:
+        raise TimeoutError("Serial read timed out waiting for RPC data")
+
+    original_timeout = ser.timeout
+    if original_timeout is not None and original_timeout < body_timeout:
+        ser.timeout = body_timeout
+    try:
+        pending = [first[0]]
+
+        def read_byte():
+            if pending:
+                return pending.pop()
+            b = ser.read(1)
+            if not b:
+                raise RuntimeError("Serial read timed out mid-message; stream is out of sync")
+            return b[0]
+
+        length = read_varint(read_byte)
+        data = b""
+        while len(data) < length:
+            chunk = ser.read(length - len(data))
+            if not chunk:
+                raise RuntimeError("Serial read timed out mid-message; stream is out of sync")
+            data += chunk
+        return data
+    finally:
+        ser.timeout = original_timeout
 
 
 def open_serial(port: str, timeout: float = 5.0) -> serial.Serial:
