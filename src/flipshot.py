@@ -39,6 +39,7 @@ import struct
 import sys
 import time
 import zlib
+from contextlib import contextmanager
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -213,11 +214,9 @@ def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Opti
         msg = read_message(ser)
 
         if frame_data is None:
-            screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
-            if screen_frame is not None:
-                data = find_field(screen_frame, FIELD_SCREEN_FRAME_DATA)
-                if data:
-                    frame_data = data
+            data = _screen_frame_data(msg)
+            if data:
+                frame_data = data
                 continue
 
         info = find_field(msg, FIELD_SYSTEM_DEVICE_INFO_RESPONSE)
@@ -366,12 +365,18 @@ def send_stop_screen_stream(ser: serial.Serial) -> None:
     write_message(ser, request)
 
 
-def frame_from_message(msg: bytes) -> Optional[bytes]:
+def _screen_frame_data(msg: bytes) -> Optional[bytes]:
+    """Raw frame bytes from a screen-frame message, or None for any other message."""
     screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
     if screen_frame is None:
         return None
-    data = find_field(screen_frame, FIELD_SCREEN_FRAME_DATA)
-    if not data or len(data) != FRAME_BYTES:
+    return find_field(screen_frame, FIELD_SCREEN_FRAME_DATA) or None
+
+
+def frame_from_message(msg: bytes) -> Optional[bytes]:
+    """Like _screen_frame_data, but only a complete, correctly sized frame."""
+    data = _screen_frame_data(msg)
+    if data is None or len(data) != FRAME_BYTES:
         return None
     return data
 
@@ -386,26 +391,39 @@ def require_frame(frame_data: Optional[bytes]) -> bytes:
     return frame_data
 
 
-def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
+@contextmanager
+def flipper_stream(port: str, timeout: float = 5.0):
+    """Open the port, start RPC and the screen stream, and yield
+    (ser, first_frame, device_name). On exit the stream is stopped (errors while
+    stopping are ignored so they never mask the real one) and the port closed."""
     ser = open_serial(port, timeout)
+    streaming = False
     try:
         start_rpc_session(ser)
 
         # Fire both requests up front -- they're independent, so we can read
         # whichever responses arrive first instead of waiting on them in series.
         send_start_screen_stream(ser)
+        streaming = True
         send_device_info_request(ser)
 
         try:
             frame_data, device_name = read_frame_and_device_name(ser, timeout)
         except TimeoutError:
             frame_data, device_name = None, "unknown"
-
-        # Politely stop the stream regardless of success.
-        send_stop_screen_stream(ser)
-        return require_frame(frame_data), device_name
+        yield ser, require_frame(frame_data), device_name
     finally:
+        if streaming:
+            try:
+                send_stop_screen_stream(ser)
+            except (serial.SerialException, TimeoutError, OSError):
+                pass
         ser.close()
+
+
+def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
+    with flipper_stream(port, timeout) as (_ser, frame_data, device_name):
+        return frame_data, device_name
 
 
 class BurstStopped(Exception):
@@ -514,8 +532,6 @@ def capture_burst(
 ) -> int:
     infinite = count < 0
     saved = 0
-    ser = None
-    streaming = False
     stop = _StopFlag()
     previous_term = signal.getsignal(signal.SIGTERM)
     try:
@@ -524,32 +540,22 @@ def capture_burst(
         previous_term = None
 
     try:
-        ser = open_serial(port, timeout)
-        start_rpc_session(ser)
-        send_start_screen_stream(ser)
-        streaming = True
-        send_device_info_request(ser)
-        try:
-            frame_data, device_name = read_frame_and_device_name(ser, timeout)
-        except TimeoutError:
-            frame_data, device_name = None, "unknown"
-        frame_data = require_frame(frame_data)
-
-        while True:
-            saved += 1
-            path = save_frame(
-                frame_data,
-                device_name,
-                output,
-                saved if output is not None and not is_output_folder(output) else None,
-                scale,
-                paint,
-            )
-            progress = f"{saved}" if infinite else f"{saved}/{count}"
-            print(f"{saved_message(path, scale)} ({progress})")
-            if stop.requested or (not infinite and saved >= count):
-                break
-            frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data, stop)
+        with flipper_stream(port, timeout) as (ser, frame_data, device_name):
+            while True:
+                saved += 1
+                path = save_frame(
+                    frame_data,
+                    device_name,
+                    output,
+                    saved if output is not None and not is_output_folder(output) else None,
+                    scale,
+                    paint,
+                )
+                progress = f"{saved}" if infinite else f"{saved}/{count}"
+                print(f"{saved_message(path, scale)} ({progress})")
+                if stop.requested or (not infinite and saved >= count):
+                    break
+                frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data, stop)
     except KeyboardInterrupt:
         print(f"\n{_stopped_message(saved)}")
         return 0
@@ -559,13 +565,6 @@ def capture_burst(
     finally:
         if previous_term is not None:
             signal.signal(signal.SIGTERM, previous_term)
-        if ser is not None:
-            if streaming:
-                try:
-                    send_stop_screen_stream(ser)
-                except (serial.SerialException, TimeoutError, OSError):
-                    pass
-            ser.close()
 
     if stop.requested:
         print(_stopped_message(saved))
