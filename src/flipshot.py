@@ -659,9 +659,22 @@ def _parse_scale(value: str) -> int:
     return scale
 
 
+class _BurstPlaceholder(argparse.Action):
+    """-b/--burst is pulled out of argv by _extract_burst_tokens before argparse
+    runs, so reaching this means it was written in a form we don't understand
+    (glued to other short flags, say). Fail loudly instead of ignoring it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            "-b/--burst must be a separate argument, e.g. -b 5 500 "
+            "(not combined with other short flags)"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
+        allow_abbrev=False,
         usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s [X]] [-p] [-o [OUTPUT]] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
         formatter_class=lambda prog: argparse.RawDescriptionHelpFormatter(
@@ -718,13 +731,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # Values are parsed in _extract_burst_tokens. Registered here so -b/--burst
     # shows up in help; argparse would treat N=-1 as a flag and would also
-    # swallow the port and output paths. argparse never sees -b, so the action
-    # only shapes the help entry.
+    # swallow the port and output paths. argparse never sees a well-formed -b,
+    # so the action only shapes the help entry and rejects malformed ones.
     parser.add_argument(
         "-b",
         "--burst",
+        action=_BurstPlaceholder,
+        default=argparse.SUPPRESS,
         metavar="[N] [M]",
-        dest="_burst_flag",
         help=(
             "Capture N screenshots, pausing M milliseconds between them. "
             f"N defaults to {BURST_DEFAULT_COUNT}; -1 keeps going until the script is stopped. "
@@ -733,6 +747,9 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+_ATTACHED_BURST_RE = re.compile(r"-b(-?\d+)")
 
 
 def _is_int_token(token: str) -> bool:
@@ -755,14 +772,21 @@ def _extract_burst_tokens(argv, parser):
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg not in ("-b", "--burst") and not arg.startswith("--burst="):
+        attached = _ATTACHED_BURST_RE.fullmatch(arg)  # -b5, -b-1
+        if (
+            arg not in ("-b", "--burst")
+            and not arg.startswith("--burst=")
+            and attached is None
+        ):
             remaining.append(arg)
             index += 1
             continue
         if tokens is not None:
             parser.error("-b/--burst can only be specified once")
         tokens = []
-        if arg.startswith("--burst="):
+        if attached is not None:
+            tokens.append(attached.group(1))
+        elif arg.startswith("--burst="):
             inline = arg.split("=", 1)[1]
             if inline != "":
                 tokens.append(inline)
@@ -806,7 +830,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     burst_tokens, remaining = _extract_burst_tokens(list(argv), parser)
     args = parser.parse_args(remaining)
     args.burst = _validate_burst(burst_tokens, parser)
-    del args._burst_flag
     return args
 
 
