@@ -426,23 +426,28 @@ def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
         return frame_data, device_name
 
 
-class BurstStopped(Exception):
-    """The user asked an in-progress burst to end (Ctrl+C or SIGTERM)."""
+@contextmanager
+def sigterm_as_interrupt():
+    """Treat SIGTERM like Ctrl+C for the duration of the block."""
 
+    def handler(_signum, _frame):
+        raise KeyboardInterrupt
 
-class _StopFlag:
-    def __init__(self) -> None:
-        self.requested = False
-
-    def request(self, _signum, _frame) -> None:
-        self.requested = True
+    try:
+        previous = signal.signal(signal.SIGTERM, handler)
+    except (ValueError, OSError):  # not the main thread, or no SIGTERM here
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
 def wait_for_latest_frame(
     ser: serial.Serial,
     seconds: float,
     frame_data: bytes,
-    stop: _StopFlag,
 ) -> bytes:
     """Keep reading for `seconds`, retaining the newest complete screen frame.
 
@@ -454,8 +459,6 @@ def wait_for_latest_frame(
     original_timeout = ser.timeout
     try:
         while True:
-            if stop.requested:
-                raise BurstStopped
             remaining = deadline - time.time()
             if remaining <= 0:
                 return frame_data
@@ -532,15 +535,12 @@ def capture_burst(
 ) -> int:
     infinite = count < 0
     saved = 0
-    stop = _StopFlag()
-    previous_term = signal.getsignal(signal.SIGTERM)
     try:
-        signal.signal(signal.SIGTERM, stop.request)
-    except (ValueError, OSError):
-        previous_term = None
-
-    try:
-        with flipper_stream(port, timeout) as (ser, frame_data, device_name):
+        with sigterm_as_interrupt(), flipper_stream(port, timeout) as (
+            ser,
+            frame_data,
+            device_name,
+        ):
             while True:
                 saved += 1
                 path = save_frame(
@@ -553,21 +553,11 @@ def capture_burst(
                 )
                 progress = f"{saved}" if infinite else f"{saved}/{count}"
                 print(f"{saved_message(path, scale)} ({progress})")
-                if stop.requested or (not infinite and saved >= count):
+                if not infinite and saved >= count:
                     break
-                frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data, stop)
+                frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data)
     except KeyboardInterrupt:
         print(f"\n{_stopped_message(saved)}")
-        return 0
-    except BurstStopped:
-        print(_stopped_message(saved))
-        return 0
-    finally:
-        if previous_term is not None:
-            signal.signal(signal.SIGTERM, previous_term)
-
-    if stop.requested:
-        print(_stopped_message(saved))
     return 0
 
 
