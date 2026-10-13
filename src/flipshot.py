@@ -43,7 +43,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import Optional, Tuple
+from typing import NoReturn, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
@@ -258,8 +258,8 @@ def find_flipper_port() -> Optional[str]:
     return matches[0].device
 
 
-def quit_message(message: str, code: int = 1) -> None:
-    print(message)
+def quit_message(message: str, code: int = 1) -> NoReturn:
+    print(message, file=sys.stderr)
     sys.exit(code)
 
 
@@ -335,13 +335,19 @@ def read_message(ser: serial.Serial, body_timeout: float = 2.0) -> bytes:
 
 
 def open_serial(port: str, timeout: float = 5.0) -> serial.Serial:
-    return serial.Serial(
-        port,
-        baudrate=115200,
-        timeout=timeout,
-        dsrdtr=False,
-        write_timeout=5,
-    )
+    try:
+        return serial.Serial(
+            port,
+            baudrate=115200,
+            timeout=timeout,
+            dsrdtr=False,
+            write_timeout=5,
+        )
+    except serial.SerialException as exc:
+        raise RuntimeError(
+            f"Could not open {port}: {exc}\n"
+            "Close qFlipper or any serial terminal using the Flipper, then retry."
+        ) from exc
 
 
 def send_start_screen_stream(ser: serial.Serial) -> None:
@@ -383,7 +389,10 @@ def frame_from_message(msg: bytes) -> Optional[bytes]:
 
 def require_frame(frame_data: Optional[bytes]) -> bytes:
     if frame_data is None:
-        raise RuntimeError("Never received a screen frame before timing out")
+        raise RuntimeError(
+            "Never received a screen frame before timing out.\n"
+            "Check the USB cable, wake the Flipper, and make sure nothing else is using the port."
+        )
     if len(frame_data) != FRAME_BYTES:
         raise RuntimeError(
             f"Unexpected frame size {len(frame_data)} bytes (expected {FRAME_BYTES})"
@@ -870,18 +879,14 @@ def main() -> int:
             return capture_once(port, args.output, args.scale, args.paint)
         count, pause_ms = args.burst
         return capture_burst(port, count, pause_ms, args.output, args.scale, args.paint)
-    except serial.SerialException as exc:
-        quit_message(
-            f"Could not open {port}: {exc}\n"
-            "Close qFlipper or any serial terminal using the Flipper, then retry."
-        )
-    except TimeoutError:
-        quit_message(
-            f"Timed out waiting for a response on {port}.\n"
-            "Check the USB cable, wake the Flipper, and make sure nothing else is using the port."
-        )
+    except KeyboardInterrupt:
+        quit_message("Cancelled.", 130)
     except RuntimeError as exc:
         quit_message(str(exc))
+    except serial.SerialException as exc:
+        quit_message(f"Lost communication with {port}: {exc}")
+    except OSError as exc:
+        quit_message(f"Could not save the screenshot: {exc}")
 
 
 if __name__ == "__main__":
