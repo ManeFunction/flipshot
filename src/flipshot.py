@@ -13,7 +13,7 @@ Homebrew Python may require break-system-packages in ~/.config/pip/pip.conf or o
 If import serial fails after installing pyserial, run: pip3 uninstall serial
 
 Usage:
-    flipshot [-v] [-b [N] [M]] [-s [X]] [-p] [-o output.png] [serial_port]
+    flipshot [-v] [-b [N] [M]] [-s X] [-p] [-o output.png] [serial_port]
 
 If serial_port is omitted, the script tries to auto-detect a connected Flipper.
 If -o/--output is omitted, the file name is
@@ -25,7 +25,7 @@ slash, which is created), the file is saved there under that default name.
 N defaults to 10 (-1 keeps going until the script is stopped). M defaults to
 1000 and must be between 100 and 5000.
 
--s [X], --scale [X] enlarges the image X times (X from 1 to 10), so every Flipper
+-s X, --scale X enlarges the image X times (X from 1 to 10), so every Flipper
 pixel becomes an XxX block, e.g. -s 3.
 -p, --paint draws the screen in Flipper's own colors (orange background
 instead of white).
@@ -684,7 +684,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flipshot",
         allow_abbrev=False,
-        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s [X]] [-p] [-o [OUTPUT]] [port]",
+        usage="%(prog)s [-h] [-v] [-b [N] [M]] [-s X] [-p] [-o OUTPUT] [port]",
         description="Grab a frame from a Flipper Zero's screen and save it as a PNG.",
         formatter_class=lambda prog: argparse.RawDescriptionHelpFormatter(
             prog, max_help_position=30
@@ -712,7 +712,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         default=None,
-        metavar="[OUTPUT]",
+        metavar="OUTPUT",
         help="Output PNG path (default: flipshot-<device-name>-<timestamp>.png), "
         "or a folder to save the default-named file into (created if the path ends with a slash). "
         "With --burst and an explicit file path, files are numbered: shot.png -> shot-1.png, shot-2.png, ...",
@@ -722,7 +722,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--scale",
         type=_parse_scale,
         default=1,
-        metavar="[X]",
+        metavar="X",
         help=f"Enlarge the image X times, X from {SCALE_MIN} to {SCALE_MAX}: "
         "every Flipper pixel becomes an XxX block, e.g. -s 3 gives 384x192 (default: 1)",
     )
