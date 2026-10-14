@@ -43,7 +43,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import NoReturn, Optional, Tuple
+from typing import NamedTuple, NoReturn, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
@@ -63,6 +63,14 @@ FIELD_SYSTEM_DEVICE_INFO_RESPONSE = 33
 FIELD_SCREEN_FRAME_DATA = 1
 FIELD_DEVICE_INFO_KEY = 1
 FIELD_DEVICE_INFO_VALUE = 2
+
+# Main.command_id values for the requests we send.
+COMMAND_START_SCREEN_STREAM = 1
+COMMAND_STOP_SCREEN_STREAM = 2
+COMMAND_DEVICE_INFO = 10
+
+# Screen frames are ~1 KB; anything this large means we are reading garbage.
+MAX_MESSAGE_BYTES = 1024 * 1024
 
 DEVICE_NAME_INFO_KEYS = ("hardware.name", "hardware_name")
 
@@ -120,54 +128,52 @@ def read_varint(read_byte):
         if not (b & 0x80):
             return result
         shift += 7
+        if shift > 63:
+            raise ValueError("Protobuf varint is too long")
+
+
+def decode_varint(buf: bytes, i: int) -> Tuple[int, int]:
+    """Decode the varint at buf[i]. Returns (value, index after it)."""
+    pos = i
+
+    def read_byte():
+        nonlocal pos
+        if pos >= len(buf):
+            raise ValueError("Truncated protobuf message")
+        pos += 1
+        return buf[pos - 1]
+
+    return read_varint(read_byte), pos
+
+
+def _take(buf: bytes, i: int, count: int) -> Tuple[bytes, int]:
+    if i + count > len(buf):
+        raise ValueError("Truncated protobuf message")
+    return buf[i:i + count], i + count
 
 
 def iter_fields(buf: bytes):
     """Yield (field_number, wire_type, value) for a flat protobuf message.
-    value is an int for wire type 0/1/5, or raw bytes for wire type 2."""
+    value is an int for wire type 0, or raw bytes for wire types 1, 2 and 5.
+    Raises ValueError on truncated or unsupported input."""
     i = 0
-    n = len(buf)
-    while i < n:
-        tag, shift = 0, 0
-        while True:
-            b = buf[i]
-            i += 1
-            tag |= (b & 0x7F) << shift
-            if not (b & 0x80):
-                break
-            shift += 7
+    while i < len(buf):
+        tag, i = decode_varint(buf, i)
         field_number = tag >> 3
         wire_type = tag & 0x7
 
         if wire_type == 0:  # varint
-            value, shift = 0, 0
-            while True:
-                b = buf[i]
-                i += 1
-                value |= (b & 0x7F) << shift
-                if not (b & 0x80):
-                    break
-                shift += 7
-            yield field_number, wire_type, value
+            value, i = decode_varint(buf, i)
         elif wire_type == 1:  # 64-bit
-            yield field_number, wire_type, buf[i:i + 8]
-            i += 8
+            value, i = _take(buf, i, 8)
         elif wire_type == 2:  # length-delimited
-            length, shift = 0, 0
-            while True:
-                b = buf[i]
-                i += 1
-                length |= (b & 0x7F) << shift
-                if not (b & 0x80):
-                    break
-                shift += 7
-            yield field_number, wire_type, buf[i:i + length]
-            i += length
+            length, i = decode_varint(buf, i)
+            value, i = _take(buf, i, length)
         elif wire_type == 5:  # 32-bit
-            yield field_number, wire_type, buf[i:i + 4]
-            i += 4
+            value, i = _take(buf, i, 4)
         else:
             raise ValueError(f"Unsupported wire type {wire_type}")
+        yield field_number, wire_type, value
 
 
 def find_field(buf: bytes, wanted_field_number: int):
@@ -202,6 +208,38 @@ def decode_string_field(buf: bytes, field_number: int) -> Optional[str]:
     return raw.decode("utf-8", errors="replace")
 
 
+class FrameEvent(NamedTuple):
+    """A screen frame from the Flipper. data is not checked for length."""
+
+    data: bytes
+
+
+class DeviceInfoEvent(NamedTuple):
+    """One key/value entry of the device info response; has_next is False on the last."""
+
+    key: Optional[str]
+    value: Optional[str]
+    has_next: bool
+
+
+def decode_event(msg: bytes):
+    """Decode a raw RPC message into a FrameEvent or DeviceInfoEvent, or None for
+    anything else. Raises ValueError if the message is malformed."""
+    screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
+    if screen_frame is not None:
+        data = find_field(screen_frame, FIELD_SCREEN_FRAME_DATA)
+        return FrameEvent(data) if data else None
+
+    info = find_field(msg, FIELD_SYSTEM_DEVICE_INFO_RESPONSE)
+    if info is not None:
+        return DeviceInfoEvent(
+            decode_string_field(info, FIELD_DEVICE_INFO_KEY),
+            decode_string_field(info, FIELD_DEVICE_INFO_VALUE),
+            find_field(msg, FIELD_HAS_NEXT) not in (None, 0),
+        )
+    return None
+
+
 def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Optional[bytes], str]:
     """Read screen-frame and device-info responses off the same stream, whichever
     arrives first. The two requests are independent, so there's no need to wait
@@ -211,23 +249,15 @@ def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Opti
     device_name = None
     device_info_done = False
     while time.time() < deadline and (frame_data is None or not device_info_done):
-        msg = read_message(ser)
+        event = decode_event(read_message(ser))
 
-        if frame_data is None:
-            data = _screen_frame_data(msg)
-            if data:
-                frame_data = data
-                continue
-
-        info = find_field(msg, FIELD_SYSTEM_DEVICE_INFO_RESPONSE)
-        if info is not None:
-            key = decode_string_field(info, FIELD_DEVICE_INFO_KEY)
-            value = decode_string_field(info, FIELD_DEVICE_INFO_VALUE)
-            if key in DEVICE_NAME_INFO_KEYS and value:
-                device_name = value
-
-            has_next = find_field(msg, FIELD_HAS_NEXT)
-            if has_next is None or has_next == 0:
+        if isinstance(event, FrameEvent):
+            if frame_data is None:
+                frame_data = event.data
+        elif isinstance(event, DeviceInfoEvent):
+            if event.key in DEVICE_NAME_INFO_KEYS and event.value:
+                device_name = event.value
+            if not event.has_next:
                 device_info_done = True
 
     return frame_data, (device_name or "unknown")
@@ -323,6 +353,8 @@ def read_message(ser: serial.Serial, body_timeout: float = 2.0) -> bytes:
             return b[0]
 
         length = read_varint(read_byte)
+        if length > MAX_MESSAGE_BYTES:
+            raise RuntimeError(f"Implausible RPC message length {length}; stream is out of sync")
         data = b""
         while len(data) < length:
             chunk = ser.read(length - len(data))
@@ -350,41 +382,26 @@ def open_serial(port: str, timeout: float = 5.0) -> serial.Serial:
         ) from exc
 
 
-def send_start_screen_stream(ser: serial.Serial) -> None:
-    request = encode_varint_field(FIELD_COMMAND_ID, 1) + encode_length_delimited(
-        FIELD_GUI_START_SCREEN_STREAM, b""
+def _empty_request(command_id: int, field_number: int) -> bytes:
+    return encode_varint_field(FIELD_COMMAND_ID, command_id) + encode_length_delimited(
+        field_number, b""
     )
-    write_message(ser, request)
+
+
+def send_start_screen_stream(ser: serial.Serial) -> None:
+    write_message(
+        ser, _empty_request(COMMAND_START_SCREEN_STREAM, FIELD_GUI_START_SCREEN_STREAM)
+    )
 
 
 def send_device_info_request(ser: serial.Serial) -> None:
-    request = encode_varint_field(FIELD_COMMAND_ID, 10) + encode_length_delimited(
-        FIELD_SYSTEM_DEVICE_INFO_REQUEST, b""
-    )
-    write_message(ser, request)
+    write_message(ser, _empty_request(COMMAND_DEVICE_INFO, FIELD_SYSTEM_DEVICE_INFO_REQUEST))
 
 
 def send_stop_screen_stream(ser: serial.Serial) -> None:
-    request = encode_varint_field(FIELD_COMMAND_ID, 2) + encode_length_delimited(
-        FIELD_GUI_STOP_SCREEN_STREAM, b""
+    write_message(
+        ser, _empty_request(COMMAND_STOP_SCREEN_STREAM, FIELD_GUI_STOP_SCREEN_STREAM)
     )
-    write_message(ser, request)
-
-
-def _screen_frame_data(msg: bytes) -> Optional[bytes]:
-    """Raw frame bytes from a screen-frame message, or None for any other message."""
-    screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
-    if screen_frame is None:
-        return None
-    return find_field(screen_frame, FIELD_SCREEN_FRAME_DATA) or None
-
-
-def frame_from_message(msg: bytes) -> Optional[bytes]:
-    """Like _screen_frame_data, but only a complete, correctly sized frame."""
-    data = _screen_frame_data(msg)
-    if data is None or len(data) != FRAME_BYTES:
-        return None
-    return data
 
 
 def require_frame(frame_data: Optional[bytes]) -> bytes:
@@ -476,9 +493,9 @@ def wait_for_latest_frame(
                 msg = read_message(ser)
             except TimeoutError:
                 continue
-            newer = frame_from_message(msg)
-            if newer is not None:
-                frame_data = newer
+            event = decode_event(msg)
+            if isinstance(event, FrameEvent) and len(event.data) == FRAME_BYTES:
+                frame_data = event.data
     finally:
         ser.timeout = original_timeout
 
@@ -883,6 +900,8 @@ def main() -> int:
         quit_message("Cancelled.", 130)
     except RuntimeError as exc:
         quit_message(str(exc))
+    except ValueError as exc:
+        quit_message(f"Received a malformed message from the Flipper: {exc}")
     except serial.SerialException as exc:
         quit_message(f"Lost communication with {port}: {exc}")
     except OSError as exc:
