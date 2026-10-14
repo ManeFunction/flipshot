@@ -72,7 +72,9 @@ class BurstTests(unittest.TestCase):
     def run_burst(self, ser, count, output, pause_ms=100):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            rc = f.capture_burst("x", count, pause_ms, output, connect=connector(ser))
+            rc = f.capture_burst(
+                f.CaptureRequest("x", output), f.Burst(count, pause_ms), connect=connector(ser)
+            )
         return rc, out.getvalue()
 
     def test_numbered_files_and_progress(self):

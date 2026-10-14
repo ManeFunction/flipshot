@@ -532,25 +532,48 @@ def is_output_folder(output: Optional[str]) -> bool:
     return output.endswith(("/", os.sep)) or os.path.isdir(output)
 
 
-def save_frame(
-    frame_data: bytes,
-    device_name: str,
-    output: Optional[str],
-    index: Optional[int],
-    scale: int = 1,
-    paint: bool = False,
-) -> str:
-    if is_output_folder(output):
-        os.makedirs(output, exist_ok=True)
-        path = os.path.join(output, default_output_path(device_name))
-    elif output is None:
-        path = default_output_path(device_name)
-    elif index is None:
-        path = output
-    else:
-        path = numbered_output_path(output, index)
+class Destination:
+    """Where screenshots are saved: the -o argument, resolved once.
+
+    No -o gives a timestamped file in the current folder; a folder (see
+    is_output_folder) gives timestamped files inside it, created on demand; a
+    file path is used as is, or numbered (shot-1.png, shot-2.png, ...) when
+    numbered is true, as it is for a burst.
+    """
+
+    def __init__(self, output: Optional[str], numbered: bool = False) -> None:
+        self._output = output
+        self._folder = is_output_folder(output)
+        self._numbered = numbered and output is not None and not self._folder
+
+    def path_for(self, device_name: str, index: int = 1) -> str:
+        """The path for screenshot number `index` (only used when numbering)."""
+        if self._folder:
+            os.makedirs(self._output, exist_ok=True)
+            return os.path.join(self._output, default_output_path(device_name))
+        if self._output is None:
+            return default_output_path(device_name)
+        if self._numbered:
+            return numbered_output_path(self._output, index)
+        return self._output
+
+
+def save_frame(frame_data: bytes, path: str, scale: int = 1, paint: bool = False) -> None:
     save_png(path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H, scale, paint)
-    return path
+
+
+class CaptureRequest(NamedTuple):
+    """What the user asked for, minus how many (see Burst)."""
+
+    port: str
+    output: Optional[str]
+    scale: int = 1
+    paint: bool = False
+
+
+class Burst(NamedTuple):
+    count: int  # -1 keeps going until stopped
+    pause_ms: int
 
 
 def saved_message(path: str, scale: int) -> str:
@@ -568,34 +591,27 @@ def _stopped_message(saved: int) -> str:
 
 
 def capture_burst(
-    port: str,
-    count: int,
-    pause_ms: int,
-    output: Optional[str],
-    scale: int = 1,
-    paint: bool = False,
+    request: CaptureRequest,
+    burst: Burst,
     timeout: float = 5.0,
     connect=connect_rpc,
 ) -> int:
-    infinite = count < 0
+    infinite = burst.count < 0
+    destination = Destination(request.output, numbered=True)
     saved = 0
     try:
-        with sigterm_as_interrupt(), flipper_stream(port, timeout, connect) as stream:
+        with sigterm_as_interrupt(), flipper_stream(
+            request.port, timeout, connect
+        ) as stream:
             while True:
                 saved += 1
-                path = save_frame(
-                    stream.frame,
-                    stream.device_name,
-                    output,
-                    saved if output is not None and not is_output_folder(output) else None,
-                    scale,
-                    paint,
-                )
-                progress = f"{saved}" if infinite else f"{saved}/{count}"
-                print(f"{saved_message(path, scale)} ({progress})")
-                if not infinite and saved >= count:
+                path = destination.path_for(stream.device_name, saved)
+                save_frame(stream.frame, path, request.scale, request.paint)
+                progress = f"{saved}" if infinite else f"{saved}/{burst.count}"
+                print(f"{saved_message(path, request.scale)} ({progress})")
+                if not infinite and saved >= burst.count:
                     break
-                stream.wait_for_latest(pause_ms / 1000.0)
+                stream.wait_for_latest(burst.pause_ms / 1000.0)
     except KeyboardInterrupt:
         print(f"\n{_stopped_message(saved)}")
     return 0
@@ -860,7 +876,7 @@ def _validate_burst(tokens, parser):
         parser.error(
             f"M must be between {BURST_MIN_PAUSE_MS} and {BURST_MAX_PAUSE_MS} milliseconds"
         )
-    return count, pause_ms
+    return Burst(count, pause_ms)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -873,16 +889,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
-def capture_once(
-    port: str,
-    output: Optional[str],
-    scale: int = 1,
-    paint: bool = False,
-    connect=connect_rpc,
-) -> int:
-    frame_data, device_name = grab_screen_frame(port, connect=connect)
-    out_path = save_frame(frame_data, device_name, output, None, scale, paint)
-    print(saved_message(out_path, scale))
+def capture_once(request: CaptureRequest, connect=connect_rpc) -> int:
+    frame_data, device_name = grab_screen_frame(request.port, connect=connect)
+    path = Destination(request.output).path_for(device_name)
+    save_frame(frame_data, path, request.scale, request.paint)
+    print(saved_message(path, request.scale))
     return 0
 
 
@@ -912,10 +923,10 @@ def main() -> int:
 
     print(f"Connecting to {port} ...")
     try:
+        request = CaptureRequest(port, args.output, args.scale, args.paint)
         if args.burst is None:
-            return capture_once(port, args.output, args.scale, args.paint)
-        count, pause_ms = args.burst
-        return capture_burst(port, count, pause_ms, args.output, args.scale, args.paint)
+            return capture_once(request)
+        return capture_burst(request, args.burst)
     except KeyboardInterrupt:
         quit_message("Cancelled.", 130)
     except RuntimeError as exc:
