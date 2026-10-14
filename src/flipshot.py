@@ -86,6 +86,9 @@ FRAME_BYTES = (SCREEN_W * SCREEN_H) // 8
 SCALE_MIN = 1
 SCALE_MAX = 10
 
+PNG_GRAYSCALE = 0  # sample 0 = black, 1 = white
+PNG_INDEXED = 3  # palette index 0 = ink, 1 = background
+
 # Flipper's LCD: black pixels on an orange backlight.
 PAINT_INK = (0x00, 0x00, 0x00)
 PAINT_BACKGROUND = (0xFE, 0x8A, 0x2C)
@@ -559,7 +562,9 @@ class Destination:
 
 
 def save_frame(frame_data: bytes, path: str, scale: int = 1, paint: bool = False) -> None:
-    save_png(path, frame_to_pixels(frame_data), SCREEN_W, SCREEN_H, scale, paint)
+    png = render_png(frame_data, scale, paint)
+    with open(path, "wb") as out:
+        out.write(png)
 
 
 class CaptureRequest(NamedTuple):
@@ -620,25 +625,6 @@ def capture_burst(
 # ---------------------------------------------------------------------------
 # Framebuffer -> PNG (no imaging library needed -- just stdlib zlib/struct)
 # ---------------------------------------------------------------------------
-def frame_to_pixels(frame_data: bytes) -> bytes:
-    """Flipper's framebuffer is SSD1306-style page-addressed: 8 pages of 8 rows,
-    128 columns, each byte = one column's 8 vertical pixels, LSB = topmost row.
-    A set bit means "ink" (matches this project's own icon PNG convention:
-    1 = black). Flip the 0x00/0xFF pair below if yours comes out inverted on
-    your firmware version. Returns SCREEN_W*SCREEN_H grayscale bytes, row-major."""
-    pixels = bytearray(b"\xff" * (SCREEN_W * SCREEN_H))  # 0xff = white background
-    for i, byte in enumerate(frame_data):
-        page = i // SCREEN_W
-        col = i % SCREEN_W
-        for bit in range(8):
-            y = page * 8 + bit
-            if y >= SCREEN_H:
-                continue
-            on = (byte >> bit) & 1
-            pixels[y * SCREEN_W + col] = 0x00 if on else 0xFF
-    return bytes(pixels)
-
-
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     return (
         struct.pack(">I", len(data))
@@ -648,49 +634,42 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     )
 
 
-def save_png(
-    path: str,
-    pixels: bytes,
-    width: int,
-    height: int,
-    scale: int = 1,
-    paint: bool = False,
-) -> None:
-    """Write a 1-bit PNG using only the standard library. Every pixel here is
-    already pure black (0x00) or white (0xff), so bit depth 1 is both smaller
-    and more correct than 8-bit grayscale.
+def render_png(frame_data: bytes, scale: int = 1, paint: bool = False) -> bytes:
+    """Encode a Flipper framebuffer as a 1-bit PNG, using only the standard library.
 
-    scale enlarges the image so each source pixel becomes a scale x scale block.
+    The framebuffer is SSD1306-style page-addressed: 8 pages of 8 rows, 128
+    columns, each byte = one column's 8 vertical pixels, LSB = topmost row. A set
+    bit is ink (black); a clear bit is background.
+
+    scale enlarges the image so each Flipper pixel becomes a scale x scale block.
     paint switches from 1-bit grayscale to a 2-color indexed palette (black ink
     on Flipper's orange background), which costs one extra PLTE chunk but keeps
-    the same 1-bit packing."""
-    out_w = width * scale
-    out_h = height * scale
-    if paint:
-        color_type = 3  # indexed; palette index 0 = ink, 1 = background
-    else:
-        color_type = 0  # grayscale; sample 0 = black, 1 = white
+    the same 1-bit packing.
+    """
+    out_w = SCREEN_W * scale
+    out_h = SCREEN_H * scale
+    color_type = PNG_INDEXED if paint else PNG_GRAYSCALE
     ihdr = struct.pack(">IIBBBBB", out_w, out_h, 1, color_type, 0, 0, 0)
 
     row_bytes = (out_w + 7) // 8
     raw = bytearray()
-    for y in range(height):
+    for y in range(SCREEN_H):
+        page_offset = (y // 8) * SCREEN_W
+        bit = y % 8
         row = bytearray(row_bytes)
-        for x in range(width):
-            if pixels[y * width + x] != 0:  # non-zero (0xff) = white = bit 1
+        for x in range(SCREEN_W):
+            if not (frame_data[page_offset + x] >> bit) & 1:  # background = sample 1
                 for sx in range(x * scale, (x + 1) * scale):
                     row[sx // 8] |= 0x80 >> (sx % 8)
         line = b"\x00" + bytes(row)  # filter type: None
         raw.extend(line * scale)
-    idat = zlib.compress(bytes(raw), 9)
 
-    with open(path, "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\n")
-        f.write(_png_chunk(b"IHDR", ihdr))
-        if paint:
-            f.write(_png_chunk(b"PLTE", bytes(PAINT_INK + PAINT_BACKGROUND)))
-        f.write(_png_chunk(b"IDAT", idat))
-        f.write(_png_chunk(b"IEND", b""))
+    chunks = [b"\x89PNG\r\n\x1a\n", _png_chunk(b"IHDR", ihdr)]
+    if paint:
+        chunks.append(_png_chunk(b"PLTE", bytes(PAINT_INK + PAINT_BACKGROUND)))
+    chunks.append(_png_chunk(b"IDAT", zlib.compress(bytes(raw), 9)))
+    chunks.append(_png_chunk(b"IEND", b""))
+    return b"".join(chunks)
 
 
 # ---------------------------------------------------------------------------
