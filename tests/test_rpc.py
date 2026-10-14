@@ -130,14 +130,15 @@ class ReadFrameAndNameTests(unittest.TestCase):
         )])
         self.assertEqual(f.read_frame_and_device_name(ser, 1.0)[1], "B")
 
-    def test_wait_for_latest_frame_keeps_newest_valid(self):
+    def test_wait_for_latest_keeps_newest_valid(self):
         ser = FakeSerial([
             ("data", frame_message(2)),
             ("data", frame_message(9, size=10)),  # wrong size, ignored
             ("data", frame_message(3)),
         ], timeout=0.05)
-        latest = f.wait_for_latest_frame(ser, 0.2, b"\x00" * f.FRAME_BYTES)
-        self.assertEqual(latest, b"\x03" * f.FRAME_BYTES)
+        stream = f.ScreenStream(ser, "x", b"\x00" * f.FRAME_BYTES)
+        self.assertEqual(stream.wait_for_latest(0.2), b"\x03" * f.FRAME_BYTES)
+        self.assertEqual(stream.frame, b"\x03" * f.FRAME_BYTES)
 
 
 if __name__ == "__main__":

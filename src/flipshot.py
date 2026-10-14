@@ -417,16 +417,61 @@ def require_frame(frame_data: Optional[bytes]) -> bytes:
     return frame_data
 
 
-@contextmanager
-def flipper_stream(port: str, timeout: float = 5.0):
-    """Open the port, start RPC and the screen stream, and yield
-    (ser, first_frame, device_name). On exit the stream is stopped (errors while
-    stopping are ignored so they never mask the real one) and the port closed."""
+def connect_rpc(port: str, timeout: float = 5.0) -> serial.Serial:
+    """Open the port and switch the Flipper into RPC mode. This is the one place
+    that touches real hardware; tests substitute a fake with the same signature."""
     ser = open_serial(port, timeout)
-    streaming = False
     try:
         start_rpc_session(ser)
+    except BaseException:
+        ser.close()
+        raise
+    return ser
 
+
+class ScreenStream:
+    """A running screen stream: the device name and the newest frame seen so far."""
+
+    def __init__(self, ser: serial.Serial, device_name: str, frame: bytes) -> None:
+        self._ser = ser
+        self.device_name = device_name
+        self.frame = frame
+
+    def wait_for_latest(self, seconds: float) -> bytes:
+        """Keep reading for `seconds`, retaining the newest complete screen frame.
+
+        The stream stays open during the pause. Discarding frames as they arrive
+        avoids filling the serial buffer, and the frame returned is the screen at
+        the end of the pause rather than one queued at the start.
+        """
+        ser = self._ser
+        deadline = time.time() + seconds
+        original_timeout = ser.timeout
+        try:
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return self.frame
+                ser.timeout = min(0.2, remaining)
+                try:
+                    msg = read_message(ser)
+                except TimeoutError:
+                    continue
+                event = decode_event(msg)
+                if isinstance(event, FrameEvent) and len(event.data) == FRAME_BYTES:
+                    self.frame = event.data
+        finally:
+            ser.timeout = original_timeout
+
+
+@contextmanager
+def flipper_stream(port: str, timeout: float = 5.0, connect=connect_rpc):
+    """Connect, start the screen stream, and yield a ScreenStream holding the first
+    frame. On exit the stream is stopped (errors while stopping are ignored so
+    they never mask the real one) and the port closed."""
+    ser = connect(port, timeout)
+    streaming = False
+    try:
         # Fire both requests up front -- they're independent, so we can read
         # whichever responses arrive first instead of waiting on them in series.
         send_start_screen_stream(ser)
@@ -437,7 +482,7 @@ def flipper_stream(port: str, timeout: float = 5.0):
             frame_data, device_name = read_frame_and_device_name(ser, timeout)
         except TimeoutError:
             frame_data, device_name = None, "unknown"
-        yield ser, require_frame(frame_data), device_name
+        yield ScreenStream(ser, device_name, require_frame(frame_data))
     finally:
         if streaming:
             try:
@@ -447,9 +492,11 @@ def flipper_stream(port: str, timeout: float = 5.0):
         ser.close()
 
 
-def grab_screen_frame(port: str, timeout: float = 5.0) -> Tuple[bytes, str]:
-    with flipper_stream(port, timeout) as (_ser, frame_data, device_name):
-        return frame_data, device_name
+def grab_screen_frame(
+    port: str, timeout: float = 5.0, connect=connect_rpc
+) -> Tuple[bytes, str]:
+    with flipper_stream(port, timeout, connect) as stream:
+        return stream.frame, stream.device_name
 
 
 @contextmanager
@@ -468,36 +515,6 @@ def sigterm_as_interrupt():
         yield
     finally:
         signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
-
-
-def wait_for_latest_frame(
-    ser: serial.Serial,
-    seconds: float,
-    frame_data: bytes,
-) -> bytes:
-    """Keep reading for `seconds`, retaining the newest complete screen frame.
-
-    The stream stays open during the pause. Discarding frames as they arrive
-    avoids filling the serial buffer, and the frame returned is the screen at
-    the end of the pause rather than one queued at the start.
-    """
-    deadline = time.time() + seconds
-    original_timeout = ser.timeout
-    try:
-        while True:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                return frame_data
-            ser.timeout = min(0.2, remaining)
-            try:
-                msg = read_message(ser)
-            except TimeoutError:
-                continue
-            event = decode_event(msg)
-            if isinstance(event, FrameEvent) and len(event.data) == FRAME_BYTES:
-                frame_data = event.data
-    finally:
-        ser.timeout = original_timeout
 
 
 def numbered_output_path(output: str, index: int) -> str:
@@ -558,20 +575,17 @@ def capture_burst(
     scale: int = 1,
     paint: bool = False,
     timeout: float = 5.0,
+    connect=connect_rpc,
 ) -> int:
     infinite = count < 0
     saved = 0
     try:
-        with sigterm_as_interrupt(), flipper_stream(port, timeout) as (
-            ser,
-            frame_data,
-            device_name,
-        ):
+        with sigterm_as_interrupt(), flipper_stream(port, timeout, connect) as stream:
             while True:
                 saved += 1
                 path = save_frame(
-                    frame_data,
-                    device_name,
+                    stream.frame,
+                    stream.device_name,
                     output,
                     saved if output is not None and not is_output_folder(output) else None,
                     scale,
@@ -581,7 +595,7 @@ def capture_burst(
                 print(f"{saved_message(path, scale)} ({progress})")
                 if not infinite and saved >= count:
                     break
-                frame_data = wait_for_latest_frame(ser, pause_ms / 1000.0, frame_data)
+                stream.wait_for_latest(pause_ms / 1000.0)
     except KeyboardInterrupt:
         print(f"\n{_stopped_message(saved)}")
     return 0
@@ -859,8 +873,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
-def capture_once(port: str, output: Optional[str], scale: int = 1, paint: bool = False) -> int:
-    frame_data, device_name = grab_screen_frame(port)
+def capture_once(
+    port: str,
+    output: Optional[str],
+    scale: int = 1,
+    paint: bool = False,
+    connect=connect_rpc,
+) -> int:
+    frame_data, device_name = grab_screen_frame(port, connect=connect)
     out_path = save_frame(frame_data, device_name, output, None, scale, paint)
     print(saved_message(out_path, scale))
     return 0
