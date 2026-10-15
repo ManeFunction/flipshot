@@ -4,7 +4,13 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    # Skip releases younger than a week: compromised releases are usually
+    # caught and pulled within days.
+    cooldown:
+      default-days: 7
     groups:
-      actions:
-        patterns: ["*"]
+      # GitHub's own actions go in one PR; the third-party ones (PyPI publish,
+      # Homebrew bump) get their own PR so their diffs get read.
+      github-actions:
+        patterns: ["actions/*"]
