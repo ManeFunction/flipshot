@@ -270,7 +270,7 @@ def is_flipper_port(port_info: ListPortInfo) -> bool:
     device = (port_info.device or "").lower()
     description = (port_info.description or "").lower()
     manufacturer = (port_info.manufacturer or "").lower()
-    if "flip" in device or "usbmodemflip" in device:
+    if "flip" in device:
         return True
     if "flipper" in description or "flip_" in description:
         return True
