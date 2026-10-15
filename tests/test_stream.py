@@ -2,6 +2,7 @@ import contextlib
 import io
 import os
 import signal
+import sys
 import tempfile
 import threading
 import unittest
@@ -96,6 +97,7 @@ class BurstTests(unittest.TestCase):
             self.assertEqual(len(names), 2)
             self.assertTrue(all(n.startswith("flipshot-Fliptest-") for n in names))
 
+    @unittest.skipIf(sys.platform == "win32", "os.kill(SIGTERM) terminates the process on Windows")
     def test_sigterm_stops_an_endless_burst_cleanly(self):
         before = signal.getsignal(signal.SIGTERM)
         with tempfile.TemporaryDirectory() as d:
