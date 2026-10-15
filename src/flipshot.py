@@ -520,10 +520,13 @@ def sigterm_as_interrupt():
         signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
+def with_default_extension(path: str) -> str:
+    """Append .png to a file name that has no extension."""
+    return path if os.path.splitext(path)[1] else path + ".png"
+
+
 def numbered_output_path(output: str, index: int) -> str:
-    root, ext = os.path.splitext(output)
-    if not ext:
-        ext = ".png"
+    root, ext = os.path.splitext(with_default_extension(output))
     return f"{root}-{index}{ext}"
 
 
@@ -540,8 +543,8 @@ class Destination:
 
     No -o gives a timestamped file in the current folder; a folder (see
     is_output_folder) gives timestamped files inside it, created on demand; a
-    file path is used as is, or numbered (shot-1.png, shot-2.png, ...) when
-    numbered is true, as it is for a burst.
+    file path is used as is (with .png added if it has no extension), or numbered
+    (shot-1.png, shot-2.png, ...) when numbered is true, as it is for a burst.
     """
 
     def __init__(self, output: Optional[str], numbered: bool = False) -> None:
@@ -558,7 +561,7 @@ class Destination:
             return default_output_path(device_name)
         if self._numbered:
             return numbered_output_path(self._output, index)
-        return self._output
+        return with_default_extension(self._output)
 
 
 def save_frame(frame_data: bytes, path: str, scale: int = 1, paint: bool = False) -> None:

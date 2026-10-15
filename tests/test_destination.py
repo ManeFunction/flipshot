@@ -25,8 +25,12 @@ class DestinationTests(unittest.TestCase):
         self.assertNotIn("\\", path)
 
     def test_single_file_is_used_as_is(self):
-        self.assertEqual(f.Destination("shot").path_for("Fliptest"), "shot")
-        self.assertEqual(f.Destination("a/b.png").path_for("Fliptest", 5), "a/b.png")
+        self.assertEqual(f.Destination("shot.png").path_for("Fliptest"), "shot.png")
+        self.assertEqual(f.Destination("a/b.jpg").path_for("Fliptest", 5), "a/b.jpg")
+
+    def test_single_file_without_extension_gets_png(self):
+        self.assertEqual(f.Destination("shot").path_for("Fliptest"), "shot.png")
+        self.assertEqual(f.Destination("out.d/shot").path_for("Fliptest"), "out.d/shot.png")
 
     def test_burst_file_is_numbered(self):
         d = f.Destination("shot.png", numbered=True)

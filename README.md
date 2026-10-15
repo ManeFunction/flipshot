@@ -61,7 +61,8 @@ flipshot [-h] [-v] [-b [N] [M]] [-s X] [-p] [-o OUTPUT] [serial_port]
 - `serial_port` is optional — flipshot auto-detects a connected Flipper Zero over USB.
   Pass it explicitly if auto-detection fails, e.g. `flipshot /dev/cu.usbmodemflip_XXXX1`.
 - `-o`, `--output` is optional — defaults to `flipshot-<device-name>-<YYYY-MM-DD--HH-MM-SS-MSS>.png`
-  in the current folder. If it points to a folder (an existing one, or a path ending with a slash, which
+  in the current folder. A file name without an extension gets `.png` added (`-o shot` saves `shot.png`).
+  If it points to a folder (an existing one, or a path ending with a slash, which
   is created), the screenshot is saved there under the default name: `flipshot -o ~/Pictures/flipper/`.
   With `--burst` and an explicit file path, files are numbered: `shot.png` becomes `shot-1.png`,
   `shot-2.png`, and so on; with a folder, every file gets its own timestamped default name.
