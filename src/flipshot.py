@@ -247,11 +247,11 @@ def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Opti
     """Read screen-frame and device-info responses off the same stream, whichever
     arrives first. The two requests are independent, so there's no need to wait
     for one to fully finish before sending (and waiting on) the other."""
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     frame_data = None
     device_name = None
     device_info_done = False
-    while time.time() < deadline and (frame_data is None or not device_info_done):
+    while time.monotonic() < deadline and (frame_data is None or not device_info_done):
         event = decode_event(read_message(ser))
 
         if isinstance(event, FrameEvent):
@@ -303,8 +303,8 @@ def _drain_until_idle(ser: serial.Serial, idle_gap: float = 0.05, max_wait: floa
     original_timeout = ser.timeout
     ser.timeout = idle_gap
     try:
-        deadline = time.time() + max_wait
-        while time.time() < deadline:
+        deadline = time.monotonic() + max_wait
+        while time.monotonic() < deadline:
             if not ser.read(4096):
                 return
     finally:
@@ -448,11 +448,11 @@ class ScreenStream:
         the end of the pause rather than one queued at the start.
         """
         ser = self._ser
-        deadline = time.time() + seconds
+        deadline = time.monotonic() + seconds
         original_timeout = ser.timeout
         try:
             while True:
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return self.frame
                 ser.timeout = min(0.2, remaining)
