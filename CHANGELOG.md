@@ -6,8 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.4.0] - 2026-10-15
+### Added
+- Screenshots are now saved upright. A Flipper in left-handed mode used to produce upside-down images;
+
 ### Changed
+- **Breaking:** Python 3.9 or newer is now required (it was 3.8).
 - `-s` / `--scale` now takes a plain number: `-s 3` instead of `-s x3`. The `x3` form is still accepted.
+- `-o shot` now saves `shot.png` when the name has no extension, the same as burst mode already did
+  (`shot-1.png`, ...).
+- Long options can no longer be abbreviated (`--out` must be written `--output`); this is what lets
+  `--bur 5` be reported as an error instead of being silently ignored.
+- Errors are printed to stderr. Losing the connection mid-capture is reported as such, instead of
+  "Could not open ... Close qFlipper"; the "no screen frame" error now includes the cable hint.
+- A burst stopped with SIGTERM now ends the same way as with Ctrl+C.
+
+### Fixed
+- A burst could lose sync with the Flipper after a short read timeout, leaving later screenshots as
+  duplicates of an earlier one (or crashing on garbage data). A message that has started is now read to the end, and a stalled one is reported as an error.
+- `-b5` is now accepted, and `-bp`, `-pb` and `--bur 5` report an error instead of silently taking one plain screenshot (and dropping `-p`).
+- Ctrl+C during a single screenshot exits cleanly ("Cancelled.") instead of printing a traceback.
+- A failed save (for example `-o missing-folder/x.png`) is reported as an error instead of a traceback, and a malformed message from the device is reported instead of crashing with `IndexError`.
+- A failure while stopping the screen stream no longer discards a screenshot that was already captured.
+- `flipshot.exe --version` on Windows reported `0.0.0-dev`; it now shows the release version.
+- Timeouts no longer misbehave when the system clock is adjusted while a screenshot is being taken
+  (a burst pause could hang, or the first-frame wait could end instantly).
 
 ## [1.3.0] - 2026-10-06
 ### Added
