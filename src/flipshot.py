@@ -61,8 +61,18 @@ FIELD_GUI_SCREEN_FRAME = 22          # oneof: ScreenFrame { bytes data = 1; ... 
 FIELD_SYSTEM_DEVICE_INFO_REQUEST = 32
 FIELD_SYSTEM_DEVICE_INFO_RESPONSE = 33
 FIELD_SCREEN_FRAME_DATA = 1
+FIELD_SCREEN_FRAME_ORIENTATION = 2
 FIELD_DEVICE_INFO_KEY = 1
 FIELD_DEVICE_INFO_VALUE = 2
+
+# ScreenFrame.orientation (PB_Gui.ScreenOrientation): how the Flipper's display is
+# turned (left-handed mode is HORIZONTAL_FLIP). The frame bytes are the raw display
+# buffer, which is drawn already rotated to suit the display, so un-rotating it is
+# the client's job.
+ORIENTATION_HORIZONTAL = 0
+ORIENTATION_HORIZONTAL_FLIP = 1  # buffer is upside down: rotate 180
+ORIENTATION_VERTICAL = 2  # rotate 90 clockwise (the picture becomes 64x128)
+ORIENTATION_VERTICAL_FLIP = 3  # rotate 90 counter-clockwise (64x128)
 
 # Main.command_id values for the requests we send.
 COMMAND_START_SCREEN_STREAM = 1
@@ -211,10 +221,11 @@ def decode_string_field(buf: bytes, field_number: int) -> Optional[str]:
     return raw.decode("utf-8", errors="replace")
 
 
-class FrameEvent(NamedTuple):
+class Frame(NamedTuple):
     """A screen frame from the Flipper. data is not checked for length."""
 
     data: bytes
+    orientation: int = ORIENTATION_HORIZONTAL
 
 
 class DeviceInfoEvent(NamedTuple):
@@ -226,12 +237,15 @@ class DeviceInfoEvent(NamedTuple):
 
 
 def decode_event(msg: bytes):
-    """Decode a raw RPC message into a FrameEvent or DeviceInfoEvent, or None for
+    """Decode a raw RPC message into a Frame or DeviceInfoEvent, or None for
     anything else. Raises ValueError if the message is malformed."""
     screen_frame = find_field(msg, FIELD_GUI_SCREEN_FRAME)
     if screen_frame is not None:
         data = find_field(screen_frame, FIELD_SCREEN_FRAME_DATA)
-        return FrameEvent(data) if data else None
+        if not data:
+            return None
+        orientation = find_field(screen_frame, FIELD_SCREEN_FRAME_ORIENTATION)
+        return Frame(data, orientation if isinstance(orientation, int) else ORIENTATION_HORIZONTAL)
 
     info = find_field(msg, FIELD_SYSTEM_DEVICE_INFO_RESPONSE)
     if info is not None:
@@ -243,27 +257,27 @@ def decode_event(msg: bytes):
     return None
 
 
-def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Optional[bytes], str]:
+def read_frame_and_device_name(ser: serial.Serial, timeout: float) -> Tuple[Optional[Frame], str]:
     """Read screen-frame and device-info responses off the same stream, whichever
     arrives first. The two requests are independent, so there's no need to wait
     for one to fully finish before sending (and waiting on) the other."""
     deadline = time.monotonic() + timeout
-    frame_data = None
+    frame = None
     device_name = None
     device_info_done = False
-    while time.monotonic() < deadline and (frame_data is None or not device_info_done):
+    while time.monotonic() < deadline and (frame is None or not device_info_done):
         event = decode_event(read_message(ser))
 
-        if isinstance(event, FrameEvent):
-            if frame_data is None:
-                frame_data = event.data
+        if isinstance(event, Frame):
+            if frame is None:
+                frame = event
         elif isinstance(event, DeviceInfoEvent):
             if event.key in DEVICE_NAME_INFO_KEYS and event.value:
                 device_name = event.value
             if not event.has_next:
                 device_info_done = True
 
-    return frame_data, (device_name or "unknown")
+    return frame, (device_name or "unknown")
 
 
 def is_flipper_port(port_info: ListPortInfo) -> bool:
@@ -407,17 +421,17 @@ def send_stop_screen_stream(ser: serial.Serial) -> None:
     )
 
 
-def require_frame(frame_data: Optional[bytes]) -> bytes:
-    if frame_data is None:
+def require_frame(frame: Optional[Frame]) -> Frame:
+    if frame is None:
         raise RuntimeError(
             "Never received a screen frame before timing out.\n"
             "Check the USB cable, wake the Flipper, and make sure nothing else is using the port."
         )
-    if len(frame_data) != FRAME_BYTES:
+    if len(frame.data) != FRAME_BYTES:
         raise RuntimeError(
-            f"Unexpected frame size {len(frame_data)} bytes (expected {FRAME_BYTES})"
+            f"Unexpected frame size {len(frame.data)} bytes (expected {FRAME_BYTES})"
         )
-    return frame_data
+    return frame
 
 
 def connect_rpc(port: str, timeout: float = 5.0) -> serial.Serial:
@@ -435,12 +449,12 @@ def connect_rpc(port: str, timeout: float = 5.0) -> serial.Serial:
 class ScreenStream:
     """A running screen stream: the device name and the newest frame seen so far."""
 
-    def __init__(self, ser: serial.Serial, device_name: str, frame: bytes) -> None:
+    def __init__(self, ser: serial.Serial, device_name: str, frame: Frame) -> None:
         self._ser = ser
         self.device_name = device_name
         self.frame = frame
 
-    def wait_for_latest(self, seconds: float) -> bytes:
+    def wait_for_latest(self, seconds: float) -> Frame:
         """Keep reading for `seconds`, retaining the newest complete screen frame.
 
         The stream stays open during the pause. Discarding frames as they arrive
@@ -461,8 +475,8 @@ class ScreenStream:
                 except TimeoutError:
                     continue
                 event = decode_event(msg)
-                if isinstance(event, FrameEvent) and len(event.data) == FRAME_BYTES:
-                    self.frame = event.data
+                if isinstance(event, Frame) and len(event.data) == FRAME_BYTES:
+                    self.frame = event
         finally:
             ser.timeout = original_timeout
 
@@ -482,10 +496,10 @@ def flipper_stream(port: str, timeout: float = 5.0, connect=connect_rpc):
         send_device_info_request(ser)
 
         try:
-            frame_data, device_name = read_frame_and_device_name(ser, timeout)
+            frame, device_name = read_frame_and_device_name(ser, timeout)
         except TimeoutError:
-            frame_data, device_name = None, "unknown"
-        yield ScreenStream(ser, device_name, require_frame(frame_data))
+            frame, device_name = None, "unknown"
+        yield ScreenStream(ser, device_name, require_frame(frame))
     finally:
         if streaming:
             try:
@@ -497,7 +511,7 @@ def flipper_stream(port: str, timeout: float = 5.0, connect=connect_rpc):
 
 def grab_screen_frame(
     port: str, timeout: float = 5.0, connect=connect_rpc
-) -> Tuple[bytes, str]:
+) -> Tuple[Frame, str]:
     with flipper_stream(port, timeout, connect) as stream:
         return stream.frame, stream.device_name
 
@@ -564,8 +578,8 @@ class Destination:
         return with_default_extension(self._output)
 
 
-def save_frame(frame_data: bytes, path: str, scale: int = 1, paint: bool = False) -> None:
-    png = render_png(frame_data, scale, paint)
+def save_frame(frame: Frame, path: str, scale: int = 1, paint: bool = False) -> None:
+    png = render_png(frame, scale, paint)
     with open(path, "wb") as out:
         out.write(png)
 
@@ -584,10 +598,11 @@ class Burst(NamedTuple):
     pause_ms: int
 
 
-def saved_message(path: str, scale: int) -> str:
+def saved_message(path: str, scale: int, frame: Frame) -> str:
+    width, height = image_size(frame.orientation)
     if scale == 1:
-        return f"Saved native {SCREEN_W}x{SCREEN_H} PNG to {path}"
-    return f"Saved {SCREEN_W * scale}x{SCREEN_H * scale} PNG (x{scale}) to {path}"
+        return f"Saved native {width}x{height} PNG to {path}"
+    return f"Saved {width * scale}x{height * scale} PNG (x{scale}) to {path}"
 
 
 def _stopped_message(saved: int) -> str:
@@ -616,7 +631,7 @@ def capture_burst(
                 path = destination.path_for(stream.device_name, saved)
                 save_frame(stream.frame, path, request.scale, request.paint)
                 progress = f"{saved}" if infinite else f"{saved}/{burst.count}"
-                print(f"{saved_message(path, request.scale)} ({progress})")
+                print(f"{saved_message(path, request.scale, stream.frame)} ({progress})")
                 if not infinite and saved >= burst.count:
                     break
                 stream.wait_for_latest(burst.pause_ms / 1000.0)
@@ -637,31 +652,52 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     )
 
 
-def render_png(frame_data: bytes, scale: int = 1, paint: bool = False) -> bytes:
-    """Encode a Flipper framebuffer as a 1-bit PNG, using only the standard library.
+def image_size(orientation: int) -> Tuple[int, int]:
+    """(width, height) of the upright picture for a frame's orientation."""
+    if orientation in (ORIENTATION_VERTICAL, ORIENTATION_VERTICAL_FLIP):
+        return SCREEN_H, SCREEN_W
+    return SCREEN_W, SCREEN_H
+
+
+def _buffer_position(orientation: int, x: int, y: int) -> Tuple[int, int]:
+    """Where pixel (x, y) of the upright picture sits in the 128x64 display buffer."""
+    if orientation == ORIENTATION_HORIZONTAL_FLIP:
+        return SCREEN_W - 1 - x, SCREEN_H - 1 - y
+    if orientation == ORIENTATION_VERTICAL:
+        return y, SCREEN_H - 1 - x
+    if orientation == ORIENTATION_VERTICAL_FLIP:
+        return SCREEN_W - 1 - y, x
+    return x, y  # HORIZONTAL, and anything we don't know
+
+
+def render_png(frame: Frame, scale: int = 1, paint: bool = False) -> bytes:
+    """Encode a Flipper frame as an upright 1-bit PNG, using only the standard library.
 
     The framebuffer is SSD1306-style page-addressed: 8 pages of 8 rows, 128
     columns, each byte = one column's 8 vertical pixels, LSB = topmost row. A set
-    bit is ink (black); a clear bit is background.
+    bit is ink (black); a clear bit is background. The frame's orientation says
+    how that buffer is turned relative to how the Flipper is held; the picture is
+    rotated back so it reads the way it does on the device (see ORIENTATION_*).
 
     scale enlarges the image so each Flipper pixel becomes a scale x scale block.
     paint switches from 1-bit grayscale to a 2-color indexed palette (black ink
     on Flipper's orange background), which costs one extra PLTE chunk but keeps
     the same 1-bit packing.
     """
-    out_w = SCREEN_W * scale
-    out_h = SCREEN_H * scale
+    data = frame.data
+    width, height = image_size(frame.orientation)
+    out_w = width * scale
+    out_h = height * scale
     color_type = PNG_INDEXED if paint else PNG_GRAYSCALE
     ihdr = struct.pack(">IIBBBBB", out_w, out_h, 1, color_type, 0, 0, 0)
 
     row_bytes = (out_w + 7) // 8
     raw = bytearray()
-    for y in range(SCREEN_H):
-        page_offset = (y // 8) * SCREEN_W
-        bit = y % 8
+    for y in range(height):
         row = bytearray(row_bytes)
-        for x in range(SCREEN_W):
-            if not (frame_data[page_offset + x] >> bit) & 1:  # background = sample 1
+        for x in range(width):
+            bx, by = _buffer_position(frame.orientation, x, y)
+            if not (data[(by // 8) * SCREEN_W + bx] >> (by % 8)) & 1:  # background = sample 1
                 for sx in range(x * scale, (x + 1) * scale):
                     row[sx // 8] |= 0x80 >> (sx % 8)
         line = b"\x00" + bytes(row)  # filter type: None
@@ -872,10 +908,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def capture_once(request: CaptureRequest, connect=connect_rpc) -> int:
-    frame_data, device_name = grab_screen_frame(request.port, connect=connect)
+    frame, device_name = grab_screen_frame(request.port, connect=connect)
     path = Destination(request.output).path_for(device_name)
-    save_frame(frame_data, path, request.scale, request.paint)
-    print(saved_message(path, request.scale))
+    save_frame(frame, path, request.scale, request.paint)
+    print(saved_message(path, request.scale, frame))
     return 0
 
 

@@ -4,7 +4,7 @@ import zlib
 
 from helpers import f
 
-BLANK = bytes(f.FRAME_BYTES)
+BLANK = f.Frame(bytes(f.FRAME_BYTES))
 
 
 def decode_png(png):
@@ -34,12 +34,17 @@ def decode_png(png):
     return width, height, color_type, palette, rows
 
 
-def frame_with(*pixels):
-    """A framebuffer with the given (x, y) pixels set to ink."""
+def frame_with(*pixels, orientation=f.ORIENTATION_HORIZONTAL):
+    """A frame whose display buffer has the given (x, y) pixels set to ink."""
     data = bytearray(f.FRAME_BYTES)
     for x, y in pixels:
         data[(y // 8) * f.SCREEN_W + x] |= 1 << (y % 8)
-    return bytes(data)
+    return f.Frame(bytes(data), orientation)
+
+
+def ink_pixels(png):
+    rows = decode_png(png)[4]
+    return {(x, y) for y, row in enumerate(rows) for x, v in enumerate(row) if v == 0}
 
 
 class RenderPngTests(unittest.TestCase):
@@ -55,7 +60,7 @@ class RenderPngTests(unittest.TestCase):
         self.assertEqual(ink, set(points))
 
     def test_full_frame_is_all_ink(self):
-        rows = decode_png(f.render_png(b"\xff" * f.FRAME_BYTES))[4]
+        rows = decode_png(f.render_png(f.Frame(b"\xff" * f.FRAME_BYTES)))[4]
         self.assertTrue(all(sample == 0 for row in rows for sample in row))
 
     def test_scale_makes_blocks(self):
@@ -84,6 +89,68 @@ class RenderPngTests(unittest.TestCase):
             f.save_frame(frame_with((9, 9)), path, scale=2)
             with open(path, "rb") as fh:
                 self.assertEqual(fh.read(), f.render_png(frame_with((9, 9)), 2))
+
+
+# Buffer pixel (bx, by) must land here in the upright picture. These are written as
+# plain geometry (turn the 128x64 buffer, then read it), not as the code's formulas.
+#   180:          (x, y) -> (127 - x, 63 - y)
+#   90 clockwise: (x, y) -> (63 - y, x)        (the picture is 64 wide, 128 tall)
+#   90 counter:   (x, y) -> (y, 127 - x)
+UPRIGHT = {
+    f.ORIENTATION_HORIZONTAL: lambda x, y: (x, y),
+    f.ORIENTATION_HORIZONTAL_FLIP: lambda x, y: (127 - x, 63 - y),
+    f.ORIENTATION_VERTICAL: lambda x, y: (63 - y, x),
+    f.ORIENTATION_VERTICAL_FLIP: lambda x, y: (y, 127 - x),
+}
+SAMPLE = [(0, 0), (127, 0), (0, 63), (127, 63), (10, 3), (100, 40)]
+
+
+class OrientationTests(unittest.TestCase):
+    def test_every_orientation_lands_pixels_upright(self):
+        for orientation, upright in UPRIGHT.items():
+            with self.subTest(orientation=orientation):
+                png = f.render_png(frame_with(*SAMPLE, orientation=orientation))
+                self.assertEqual(ink_pixels(png), {upright(x, y) for x, y in SAMPLE})
+
+    def test_left_handed_frame_is_the_buffer_turned_around(self):
+        # The top-left of the display buffer is the bottom-right of what you see.
+        png = f.render_png(frame_with((0, 0), orientation=f.ORIENTATION_HORIZONTAL_FLIP))
+        self.assertEqual(ink_pixels(png), {(127, 63)})
+
+    def test_vertical_pictures_are_64_by_128(self):
+        for orientation in (f.ORIENTATION_VERTICAL, f.ORIENTATION_VERTICAL_FLIP):
+            for scale in (1, 3):
+                with self.subTest(orientation=orientation, scale=scale):
+                    w, h, *_ = decode_png(f.render_png(frame_with(orientation=orientation), scale))
+                    self.assertEqual((w, h), (64 * scale, 128 * scale))
+
+    def test_horizontal_pictures_stay_128_by_64(self):
+        w, h, *_ = decode_png(f.render_png(frame_with(orientation=f.ORIENTATION_HORIZONTAL_FLIP)))
+        self.assertEqual((w, h), (128, 64))
+
+    def test_unknown_orientation_is_treated_as_horizontal(self):
+        png = f.render_png(frame_with((5, 6), orientation=99))
+        self.assertEqual(ink_pixels(png), {(5, 6)})
+
+    def test_scale_and_paint_work_when_rotated(self):
+        frame = frame_with((0, 0), orientation=f.ORIENTATION_VERTICAL)
+        w, h, color_type, palette, rows = decode_png(f.render_png(frame, scale=2, paint=True))
+        self.assertEqual((w, h, color_type), (128, 256, 3))
+        # buffer (0, 0) -> upright (63, 0) -> a 2x2 block at x 126-127, y 0-1
+        self.assertEqual(
+            {(x, y) for y, row in enumerate(rows) for x, v in enumerate(row) if v == 0},
+            {(126, 0), (127, 0), (126, 1), (127, 1)},
+        )
+
+    def test_saved_message_reports_the_real_size(self):
+        vertical = f.Frame(bytes(f.FRAME_BYTES), f.ORIENTATION_VERTICAL)
+        self.assertEqual(f.saved_message("a.png", 1, vertical), "Saved native 64x128 PNG to a.png")
+        self.assertEqual(
+            f.saved_message("a.png", 3, vertical), "Saved 192x384 PNG (x3) to a.png"
+        )
+        self.assertEqual(
+            f.saved_message("a.png", 1, BLANK), "Saved native 128x64 PNG to a.png"
+        )
 
 
 if __name__ == "__main__":

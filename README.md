@@ -74,6 +74,9 @@ flipshot [-h] [-v] [-b [N] [M]] [-s X] [-p] [-o OUTPUT] [serial_port]
 - `-p`, `--paint` — use the Flipper's own colors: the white background becomes orange (`#fe8a2c`).
   The image is saved as a 2-color indexed PNG instead of grayscale.
 
+Screenshots are always saved upright: a Flipper in left-handed mode (180°) is rotated back, and a
+vertical screen gives a 64x128 image.
+
 ```
 flipshot -b
 flipshot -b 20 250

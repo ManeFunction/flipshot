@@ -57,13 +57,14 @@ class FakeSerial:
         self.closed = True
 
 
-def frame_message(fill=0xFF, size=None):
-    """A length-prefixed RPC message carrying a screen frame."""
+def frame_message(fill=0xFF, size=None, orientation=None):
+    """A length-prefixed RPC message carrying a screen frame. A horizontal
+    orientation is the protobuf default, so it is left out unless asked for."""
     data = bytes([fill]) * (f.FRAME_BYTES if size is None else size)
-    body = f.encode_length_delimited(
-        f.FIELD_GUI_SCREEN_FRAME,
-        f.encode_length_delimited(f.FIELD_SCREEN_FRAME_DATA, data),
-    )
+    screen_frame = f.encode_length_delimited(f.FIELD_SCREEN_FRAME_DATA, data)
+    if orientation:
+        screen_frame += f.encode_varint_field(f.FIELD_SCREEN_FRAME_ORIENTATION, orientation)
+    body = f.encode_length_delimited(f.FIELD_GUI_SCREEN_FRAME, screen_frame)
     return f.encode_varint(len(body)) + body
 
 

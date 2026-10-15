@@ -24,13 +24,13 @@ class DeadlineClockTests(unittest.TestCase):
         with mock.patch.object(f.time, "time", jumping_clock()):
             frame, name = f.read_frame_and_device_name(ser, 5.0)
         self.assertEqual(name, "Fliptest")
-        self.assertEqual(frame, b"\x07" * f.FRAME_BYTES)
+        self.assertEqual(frame.data, b"\x07" * f.FRAME_BYTES)
 
     def test_burst_pause_survives_a_clock_jump(self):
         ser = FakeSerial([("data", frame_message(9))], timeout=0.05)
-        stream = f.ScreenStream(ser, "x", b"\x00" * f.FRAME_BYTES)
+        stream = f.ScreenStream(ser, "x", f.Frame(b"\x00" * f.FRAME_BYTES))
         with mock.patch.object(f.time, "time", jumping_clock()):
-            self.assertEqual(stream.wait_for_latest(0.2), b"\x09" * f.FRAME_BYTES)
+            self.assertEqual(stream.wait_for_latest(0.2).data, b"\x09" * f.FRAME_BYTES)
 
     def test_drain_survives_a_clock_jump(self):
         ser = FakeSerial([("data", b"junk"), ("data", b"more")])

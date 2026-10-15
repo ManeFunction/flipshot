@@ -64,8 +64,14 @@ class DecodeEventTests(unittest.TestCase):
     def test_frame(self):
         msg = frame_message(0xAB)[2:]  # strip the 2-byte length prefix
         event = f.decode_event(msg)
-        self.assertIsInstance(event, f.FrameEvent)
+        self.assertIsInstance(event, f.Frame)
         self.assertEqual(event.data, b"\xab" * f.FRAME_BYTES)
+        self.assertEqual(event.orientation, f.ORIENTATION_HORIZONTAL)
+
+    def test_frame_orientation(self):
+        for orientation in (1, 2, 3):
+            msg = frame_message(orientation=orientation)[2:]
+            self.assertEqual(f.decode_event(msg).orientation, orientation)
 
     def test_device_info(self):
         msg = device_info_message("hardware.name", "Zed", has_next=True)[1:]
@@ -120,7 +126,7 @@ class ReadFrameAndNameTests(unittest.TestCase):
             ser = FakeSerial([("data", m) for m in script])
             frame, name = f.read_frame_and_device_name(ser, 1.0)
             self.assertEqual(name, "A")
-            self.assertEqual(frame, b"\x01" * f.FRAME_BYTES)
+            self.assertEqual(frame.data, b"\x01" * f.FRAME_BYTES)
 
     def test_waits_for_last_device_info_entry(self):
         ser = FakeSerial([("data", m) for m in (
@@ -136,9 +142,15 @@ class ReadFrameAndNameTests(unittest.TestCase):
             ("data", frame_message(9, size=10)),  # wrong size, ignored
             ("data", frame_message(3)),
         ], timeout=0.05)
-        stream = f.ScreenStream(ser, "x", b"\x00" * f.FRAME_BYTES)
-        self.assertEqual(stream.wait_for_latest(0.2), b"\x03" * f.FRAME_BYTES)
-        self.assertEqual(stream.frame, b"\x03" * f.FRAME_BYTES)
+        stream = f.ScreenStream(ser, "x", f.Frame(b"\x00" * f.FRAME_BYTES))
+        self.assertEqual(stream.wait_for_latest(0.2).data, b"\x03" * f.FRAME_BYTES)
+        self.assertEqual(stream.frame.data, b"\x03" * f.FRAME_BYTES)
+
+    def test_wait_for_latest_follows_orientation_changes(self):
+        ser = FakeSerial([("data", frame_message(5, orientation=f.ORIENTATION_HORIZONTAL_FLIP))],
+                         timeout=0.05)
+        stream = f.ScreenStream(ser, "x", f.Frame(b"\x00" * f.FRAME_BYTES))
+        self.assertEqual(stream.wait_for_latest(0.2).orientation, f.ORIENTATION_HORIZONTAL_FLIP)
 
 
 if __name__ == "__main__":
