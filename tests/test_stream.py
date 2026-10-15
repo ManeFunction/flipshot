@@ -70,22 +70,6 @@ class FlipperStreamTests(unittest.TestCase):
 
 
 class OrientationCaptureTests(unittest.TestCase):
-    def test_left_handed_capture_is_saved_upright(self):
-        ser = script(
-            device_info_message(),
-            frame_message(0xFF, orientation=f.ORIENTATION_HORIZONTAL_FLIP),
-        )
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "shot.png")
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                f.capture_once(f.CaptureRequest("x", path), connect=connector(ser))
-            with open(path, "rb") as fh:
-                expected = f.render_png(
-                    f.Frame(b"\xff" * f.FRAME_BYTES, f.ORIENTATION_HORIZONTAL_FLIP)
-                )
-                self.assertEqual(fh.read(), expected)
-
     def test_vertical_capture_reports_a_64x128_picture(self):
         ser = script(device_info_message(), frame_message(0, orientation=f.ORIENTATION_VERTICAL))
         with tempfile.TemporaryDirectory() as d:

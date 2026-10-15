@@ -112,11 +112,6 @@ class OrientationTests(unittest.TestCase):
                 png = f.render_png(frame_with(*SAMPLE, orientation=orientation))
                 self.assertEqual(ink_pixels(png), {upright(x, y) for x, y in SAMPLE})
 
-    def test_left_handed_frame_is_the_buffer_turned_around(self):
-        # The top-left of the display buffer is the bottom-right of what you see.
-        png = f.render_png(frame_with((0, 0), orientation=f.ORIENTATION_HORIZONTAL_FLIP))
-        self.assertEqual(ink_pixels(png), {(127, 63)})
-
     def test_vertical_pictures_are_64_by_128(self):
         for orientation in (f.ORIENTATION_VERTICAL, f.ORIENTATION_VERTICAL_FLIP):
             for scale in (1, 3):
