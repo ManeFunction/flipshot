@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- **Breaking:** Python 3.10 or newer is now required (it was 3.9).
 
 ## [1.4.0] - 2026-10-15
 ### Added
